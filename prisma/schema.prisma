@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Accounts. Provisioned by the researcher via scripts/provision-user.ts.
+// studyParticipant=true routes the user into the guided within-subjects session.
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  passwordHash     String
+  studyParticipant Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  studySessions StudySession[]
+  events        TelemetryEvent[]
+  cvDocuments   CvDocument[]
+}
+
+// An uploaded CV. Original bytes kept for the format-preserving export
+// pipeline (.tex source resplice, .docx run rewrite); extractedText feeds
+// section parsing and model calls.
+model CvDocument {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  fileName      String
+  format        String // "pdf" | "docx" | "tex"
+  data          Bytes
+  extractedText String
+  createdAt     DateTime @default(now())
+
+  modeSteps ModeStep[]
+}
+
+// One guided within-subjects study session per participant run.
+// assignedOrder: "ONE_CLICK_FIRST" | "HUMAN_CENTERED_FIRST" (SQLite: no enums).
+// Counterbalanced across participants at session start.
+model StudySession {
+  id                       String    @id @default(cuid())
+  userId                   String
+  user                     User      @relation(fields: [userId], references: [id])
+  assignedOrder            String
+  startedAt                DateTime  @default(now())
+  completedAt              DateTime?
+  feedbackHandoffReachedAt DateTime?
+  // Optional local backup of the forced-choice preference from the external form:
+  // "ONE_CLICK" | "HUMAN_CENTERED" | null
+  localPreference          String?
+
+  modeSteps ModeStep[]
+  events    TelemetryEvent[]
+}
+
+// One mode execution within a study session (step 1 or 2), or a free-choice
+// run by a general user (studySessionId null in that case, added later phases).
+// mode: "ONE_CLICK" | "HUMAN_CENTERED".
+// Records which CV and JD were used — no assumption the JD repeats across steps.
+model ModeStep {
+  id                  String    @id @default(cuid())
+  userId              String?
+  studySessionId      String?
+  studySession        StudySession? @relation(fields: [studySessionId], references: [id])
+  stepIndex           Int? // 1 or 2 within a study session; null for free use
+  mode                String
+  cvDocumentId        String?
+  cvDocument          CvDocument? @relation(fields: [cvDocumentId], references: [id])
+  cvFileName          String?
+  cvFormat            String? // "pdf" | "docx" | "tex"
+  jdText              String?
+  conservatism        Int? // last conservatism level used (human-centered only)
+  startedAt           DateTime  @default(now())
+  endedAt             DateTime?
+  timeToFirstActionMs Int?
+  finalCvText         String?
+
+  events TelemetryEvent[]
+}
+
+// Behavioural instrumentation (RO3). Anonymised: keyed by account id only.
+// type examples: "suggestion_accepted" | "suggestion_rejected" | "suggestion_edited"
+//   | "conservatism_changed" | "mode_started" | "mode_completed"
+//   | "handoff_reached" | "export_downloaded"
+// payload: JSON string (suggestion id, section, conservatism level, etc.)
+model TelemetryEvent {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  studySessionId String?
+  studySession   StudySession? @relation(fields: [studySessionId], references: [id])
+  modeStepId     String?
+  modeStep       ModeStep?     @relation(fields: [modeStepId], references: [id])
+  type           String
+  payload        String?
+  createdAt      DateTime      @default(now())
+}

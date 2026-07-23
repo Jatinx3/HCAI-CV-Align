@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+/* Design tokens — "typeset manuscript": warm paper, ink, one editorial green
+   accent (the reviewer's pen). Light and dark defined together; dark uses
+   desaturated tonal variants, not inversions. */
+:root {
+  color-scheme: light;
+  --background: #f6f5f1;
+  --surface: #ffffff;
+  --foreground: #1c1c1a;
+  --muted-foreground: #52524e;
+  --faint-foreground: #75756f;
+  --border: #e3e2dc;
+  --border-strong: #c9c8c0;
+  --primary: #22221f;
+  --on-primary: #ffffff;
+  --accent: #196a4e;
+  --accent-soft: #e9f2ee;
+  --success: #196a4e;
+  --success-soft: #e9f2ee;
+  --warning: #8a5a0b;
+  --warning-soft: #fbf3e2;
+  --danger: #a3271f;
+  --danger-soft: #fbedeb;
+  --ring: #196a4e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #131311;
+    --surface: #1c1c19;
+    --foreground: #e8e7e1;
+    --muted-foreground: #a3a29a;
+    --faint-foreground: #7c7b74;
+    --border: #2e2e29;
+    --border-strong: #44443d;
+    --primary: #e8e7e1;
+    --on-primary: #1c1c19;
+    --accent: #5bbb95;
+    --accent-soft: #12352a;
+    --success: #5bbb95;
+    --success-soft: #12352a;
+    --warning: #e4b45e;
+    --warning-soft: #3a2a0e;
+    --danger: #e28078;
+    --danger-soft: #3b1512;
+    --ring: #5bbb95;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-display), ui-serif, Georgia, serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+/* Small-caps section labels used across screens. */
+.label-caps {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint-foreground);
+}
+
+/* Visible keyboard focus everywhere; motion kept to color/opacity only. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

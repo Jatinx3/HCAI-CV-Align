@@ -1,0 +1,78 @@
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { detectFormat, extractText } from "@/lib/extract";
+
+export const runtime = "nodejs";
+
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const formData = await request.formData();
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+  }
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json(
+      { error: "File too large (max 10 MB)" },
+      { status: 413 },
+    );
+  }
+
+  const data = Buffer.from(await file.arrayBuffer());
+  const format = detectFormat(file.name, data);
+  if (!format) {
+    return NextResponse.json(
+      { error: "Unsupported file type. Upload a .pdf, .docx, or .tex CV." },
+      { status: 415 },
+    );
+  }
+
+  let extractedText: string;
+  try {
+    extractedText = await extractText(format, data);
+  } catch {
+    return NextResponse.json(
+      { error: `Could not read this ${format} file. Is it valid?` },
+      { status: 422 },
+    );
+  }
+
+  if (!extractedText || extractedText.length < 20) {
+    return NextResponse.json(
+      {
+        error:
+          "No readable text found in this file (is it a scanned/image-only PDF?).",
+      },
+      { status: 422 },
+    );
+  }
+
+  const doc = await prisma.cvDocument.create({
+    data: {
+      userId: session.user.id,
+      fileName: file.name,
+      format,
+      data,
+      extractedText,
+    },
+  });
+
+  return NextResponse.json({
+    id: doc.id,
+    fileName: doc.fileName,
+    format: doc.format,
+    extractedText: doc.extractedText,
+    // PDF output is an explicit reformat, not a clone — surface this early.
+    reformatNotice:
+      format === "pdf"
+        ? "PDF uploads are re-laid out into a clean standard template on export; the original visual design is not preserved."
+        : null,
+  });
+}
