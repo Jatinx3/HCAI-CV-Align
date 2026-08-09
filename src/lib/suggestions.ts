@@ -1,5 +1,6 @@
 import type { CvSection } from "./sections";
 import { containsOriginal } from "./anchor";
+import { isDateOnly, splitEntry } from "./cv-layout";
 
 /**
  * The suggestion contract for human-centered mode.
@@ -91,12 +92,23 @@ Hard constraints:
 - Every suggestion must cite the specific job description requirement or phrase it addresses.
 - Every suggestion must include a short, plain-language explanation of why it helps.
 
+What a suggestion is:
+- A suggestion changes the WORDING of one passage. Moving text from one place to another
+  without rewriting it is not a suggestion, and neither is reordering existing lines.
+  If your "suggested" text contains the same words as the "original" in a different
+  order, do not return it.
+- Quote ONE sentence or ONE bullet as the "original" — at most about 40 words. Never
+  quote a whole section, several entries, or multiple bullets in a single suggestion.
+- Do not propose changes to factual records that have no wording to improve: degree
+  titles, employer names, dates, grades, and contact details.
+
 Conservatism level: ${level} of 5 — ${conservatismDescription(level)}
 Conservative means minimal, light-touch edits close to the original wording. Assertive
-means stronger reframing and reordering, still within the constraints above.
+means stronger reframing — different verbs, different emphasis, the same facts.
 
 Return between 0 and 4 suggestions for this section. Prefer a few strong suggestions over
 many weak ones. If the section already aligns well, return an empty suggestions array.
+A section of dates and qualifications often warrants none at all.
 
 The "original" field must quote text exactly as it appears in the section, character for
 character, so it can be located in the source document. Do not paraphrase it.
@@ -238,6 +250,46 @@ export function validateSuggestions(
       rejected.push({ reason: "Suggestion changes nothing.", raw: item });
       return;
     }
+    // A span this long is not one passage — it is most of a section, and the
+    // resulting diff cannot be read closely enough to decide on.
+    if (original.length > MAX_ORIGINAL_CHARS) {
+      rejected.push({
+        reason: "Quoted original covers too much of the section to review.",
+        raw: item,
+      });
+      return;
+    }
+    // Same words in a different order. The user is told each suggestion
+    // improves how something is written; a move dressed up as a rewrite makes
+    // that claim false, and produces a diff in which every word is marked as
+    // changed while nothing actually reads differently.
+    if (isReordering(original, suggested)) {
+      rejected.push({
+        reason: "Suggestion only reorders existing text.",
+        raw: item,
+      });
+      return;
+    }
+    // Degree titles, employers, dates and grades are records, not prose. There
+    // is no wording in them to improve, and rewriting the row destroys the
+    // title/date structure the document is set in.
+    if (quotesFactualRecord(original)) {
+      rejected.push({
+        reason: "Suggestion rewrites a factual record (dates, grades, titles).",
+        raw: item,
+      });
+      return;
+    }
+    // A CV is written in an implied first person; spelling it out ("I earned
+    // an MSc…") is a change of register the user did not ask for, and it is
+    // not what "aligning to a job description" means.
+    if (addsFirstPerson(original, suggested)) {
+      rejected.push({
+        reason: "Suggestion rewrites the CV into first person.",
+        raw: item,
+      });
+      return;
+    }
 
     suggestions.push({
       id: `${section.id}-s${i}`,
@@ -285,4 +337,41 @@ export function validateGaps(parsed: unknown, section: CvSection): Gap[] {
 
 function normalise(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** One sentence or bullet, generously measured. */
+const MAX_ORIGINAL_CHARS = 320;
+
+/** A quoted span that is a record — a qualification, a grade, a date range. */
+function quotesFactualRecord(original: string): boolean {
+  return (
+    splitEntry(original) !== null ||
+    isDateOnly(original) ||
+    /\b(GPA|CGPA)\b/i.test(original) ||
+    /\b(Expected|Graduated|Anticipated)\s+\d/i.test(original)
+  );
+}
+
+/** True when the proposal introduces first-person pronouns the CV did not use. */
+function addsFirstPerson(original: string, suggested: string): boolean {
+  const first = /\b(I|I'm|I've|my|me)\b/i;
+  return !first.test(original) && first.test(suggested);
+}
+
+/**
+ * True when both texts are built from exactly the same words, so the only
+ * difference is their order.
+ */
+function isReordering(original: string, suggested: string): boolean {
+  const words = (s: string) =>
+    normalise(s)
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .sort();
+
+  const a = words(original);
+  const b = words(suggested);
+  if (a.length !== b.length || a.length === 0) return false;
+  return a.every((w, i) => w === b[i]);
 }
