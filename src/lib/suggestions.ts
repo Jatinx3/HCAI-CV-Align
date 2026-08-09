@@ -1,4 +1,5 @@
 import type { CvSection } from "./sections";
+import { containsOriginal } from "./anchor";
 
 /**
  * The suggestion contract for human-centered mode.
@@ -57,6 +58,22 @@ export type Suggestion = {
 };
 
 /**
+ * A job-description requirement this section does not evidence.
+ *
+ * The authenticity constraint already tells the model to note gaps rather than
+ * fill them; without somewhere to put them, that instruction produced nothing
+ * the user could see. Surfacing gaps is the honest counterpart to a suggestion:
+ * it tells the user what the CV genuinely does not support, instead of quietly
+ * inventing it.
+ */
+export type Gap = {
+  id: string;
+  sectionId: string;
+  jdRequirement: string;
+  note: string;
+};
+
+/**
  * The authenticity system prompt. Every hard constraint is load-bearing:
  * removing any of them changes what the prototype is arguing for.
  */
@@ -84,6 +101,11 @@ many weak ones. If the section already aligns well, return an empty suggestions 
 The "original" field must quote text exactly as it appears in the section, character for
 character, so it can be located in the source document. Do not paraphrase it.
 
+Separately, list any job description requirement that this section does not evidence.
+Report it as a gap — never as a suggestion, and never by inventing content to cover it.
+Return between 0 and 3 gaps. Only report a gap this section would plausibly be the place
+to evidence; do not repeat the entire job description.
+
 Return only valid JSON in this shape:
 {
   "section": "<section name>",
@@ -93,6 +115,12 @@ Return only valid JSON in this shape:
       "suggested": "<proposed text>",
       "explanation": "<why this helps, plain language>",
       "jd_requirement": "<the specific JD phrase or requirement this addresses>"
+    }
+  ],
+  "gaps": [
+    {
+      "jd_requirement": "<the specific JD phrase this section does not evidence>",
+      "note": "<plain-language statement of what is missing, with no invented content>"
     }
   ]
 }
@@ -165,7 +193,6 @@ export function validateSuggestions(
   }
 
   const sectionText = section.text;
-  const normalisedSection = normalise(sectionText);
 
   rawList.forEach((item, i) => {
     const r = item as Record<string, unknown>;
@@ -198,11 +225,9 @@ export function validateSuggestions(
       return;
     }
     // The quoted original must really exist in the section, or accepting it
-    // would edit text the user never wrote.
-    if (
-      !sectionText.includes(original) &&
-      !normalisedSection.includes(normalise(original))
-    ) {
+    // would edit text the user never wrote. Uses the same matching rule as the
+    // review UI and the replacement itself, so the three cannot disagree.
+    if (!containsOriginal(sectionText, original)) {
       rejected.push({
         reason: "Quoted original text is not present in the section.",
         raw: item,
@@ -225,6 +250,37 @@ export function validateSuggestions(
   });
 
   return { suggestions, rejected };
+}
+
+/**
+ * Validate the gaps a section reported. Same transparency bar as suggestions:
+ * a gap without a named JD requirement or without a plain-language note is not
+ * informative, so it is dropped rather than shown.
+ */
+export function validateGaps(parsed: unknown, section: CvSection): Gap[] {
+  const rawList = (parsed as { gaps?: unknown })?.gaps;
+  if (!Array.isArray(rawList)) return [];
+
+  const gaps: Gap[] = [];
+  rawList.forEach((item, i) => {
+    const r = item as Record<string, unknown>;
+    const jdRequirement =
+      typeof r.jd_requirement === "string"
+        ? r.jd_requirement.trim()
+        : typeof r.jdRequirement === "string"
+          ? r.jdRequirement.trim()
+          : "";
+    const note = typeof r.note === "string" ? r.note.trim() : "";
+    if (!nonEmptyString(jdRequirement) || !nonEmptyString(note)) return;
+
+    gaps.push({
+      id: `${section.id}-g${i}`,
+      sectionId: section.id,
+      jdRequirement,
+      note,
+    });
+  });
+  return gaps;
 }
 
 function normalise(s: string): string {

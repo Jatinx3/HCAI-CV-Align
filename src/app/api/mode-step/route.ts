@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -12,10 +12,11 @@ export const runtime = "nodejs";
  * recorded per step rather than on the CV.
  */
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const authed = await requireUser();
+  if (!authed.ok) {
+    return NextResponse.json({ error: authed.error }, { status: authed.status });
   }
+  const user = authed.user;
 
   let body: { cvId?: string; jdText?: string; mode?: string };
   try {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
   }
 
   const doc = await prisma.cvDocument.findFirst({
-    where: { id: cvId, userId: session.user.id },
+    where: { id: cvId, userId: user.id },
   });
   if (!doc) {
     return NextResponse.json({ error: "CV not found" }, { status: 404 });
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
 
   const step = await prisma.modeStep.create({
     data: {
-      userId: session.user.id,
+      userId: user.id,
       mode,
       cvDocumentId: doc.id,
       cvFileName: doc.fileName,

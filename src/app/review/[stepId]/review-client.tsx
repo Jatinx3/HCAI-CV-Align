@@ -1,29 +1,37 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CvSection } from "@/lib/sections";
 import { assembleCv } from "@/lib/sections";
+import { wordDiff, findInJd } from "@/lib/diff";
+import { applyReplacement, containsOriginal } from "@/lib/anchor";
 import {
   CONSERVATISM_LEVELS,
   type ConservatismLevel,
+  type Gap,
   type Suggestion,
 } from "@/lib/suggestions";
 
 type Decision = "pending" | "accepted" | "rejected";
 
-type SuggestionState = {
-  decision: Decision;
-  /** User-edited replacement text; falls back to the model's suggestion. */
-  editedText?: string;
-};
-
-type ApiResponse = {
-  sections: CvSection[];
-  suggestions: Suggestion[];
-  droppedInvalid: number;
-  failures: { sectionId: string; reason: string }[];
-  model: string;
-  error?: string;
+/**
+ * A change the user has accepted and that is now part of their working CV.
+ *
+ * Kept separately from the current round of suggestions on purpose. Accepted
+ * changes belong to the user, not to the model run that proposed them, so
+ * regenerating at a different conservatism level must not silently undo work
+ * the user already approved.
+ */
+type AppliedEdit = {
+  suggestionId: string;
+  sectionId: string;
+  original: string;
+  replacement: string;
+  jdRequirement: string;
+  /** Whether the user rewrote the proposal before accepting it. */
+  edited: boolean;
+  /** Conservatism level in effect when this was accepted. */
+  conservatism: ConservatismLevel;
 };
 
 const SECTION_LABEL: Record<string, string> = {
@@ -50,108 +58,234 @@ export default function ReviewClient({
 }) {
   const [conservatism, setConservatism] = useState<ConservatismLevel>(3);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [states, setStates] = useState<Record<string, SuggestionState>>({});
+  const [gaps, setGaps] = useState<Gap[]>([]);
+  const [applied, setApplied] = useState<AppliedEdit[]>([]);
+  const [rejected, setRejected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Record<string, string>>({});
+
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{
+    index: number;
+    total: number;
+    heading: string;
+  } | null>(null);
   const [meta, setMeta] = useState<{
     droppedInvalid: number;
     failures: { sectionId: string; reason: string }[];
     model: string;
   } | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState<string | null>(null);
 
+  const [rail, setRail] = useState<"cv" | "jd">("cv");
+  const [jdFocus, setJdFocus] = useState<string | null>(null);
+  const jdMarkRef = useRef<HTMLElement | null>(null);
+
   /**
-   * The working CV is *derived*, never mutated in place: original sections
-   * plus every accepted replacement, applied in order. That makes accept,
-   * reject and undo fully reversible — the user can never lose their original.
+   * The working CV is derived, never mutated in place: the original sections
+   * plus every accepted change, applied in order. Nothing the user has not
+   * approved can reach it, and any decision can be taken back.
    */
-  const { workingSections, unappliable } = useMemo(() => {
-    const unappliable: string[] = [];
+  const workingSections = useMemo(() => {
     const working = initialSections.map((s) => ({ ...s }));
-    for (const s of suggestions) {
-      const st = states[s.id];
-      if (st?.decision !== "accepted") continue;
-      const target = working.find((w) => w.id === s.sectionId);
+    for (const edit of applied) {
+      const target = working.find((w) => w.id === edit.sectionId);
       if (!target) continue;
-      const replacement = st.editedText ?? s.suggested;
-      if (target.text.includes(s.original)) {
-        target.text = target.text.replace(s.original, replacement);
-      } else {
-        unappliable.push(s.id);
-      }
+      target.text = applyReplacement(
+        target.text,
+        edit.original,
+        edit.replacement,
+      );
     }
-    return { workingSections: working, unappliable };
-  }, [initialSections, suggestions, states]);
+    return working;
+  }, [initialSections, applied]);
 
   const workingCv = useMemo(
     () => assembleCv(workingSections),
     [workingSections],
   );
 
+  const decisionOf = useCallback(
+    (id: string): Decision =>
+      applied.some((e) => e.suggestionId === id)
+        ? "accepted"
+        : rejected.has(id)
+          ? "rejected"
+          : "pending",
+    [applied, rejected],
+  );
+
+  /** A suggestion whose quoted original is no longer present cannot be applied. */
+  const unappliable = useCallback(
+    (s: Suggestion) => {
+      if (decisionOf(s.id) === "accepted") return false;
+      const section = workingSections.find((w) => w.id === s.sectionId);
+      return !section || !containsOriginal(section.text, s.original);
+    },
+    [workingSections, decisionOf],
+  );
+
   const acceptedCount = suggestions.filter(
-    (s) => states[s.id]?.decision === "accepted",
+    (s) => decisionOf(s.id) === "accepted",
   ).length;
   const rejectedCount = suggestions.filter(
-    (s) => states[s.id]?.decision === "rejected",
+    (s) => decisionOf(s.id) === "rejected",
   ).length;
   const pendingCount = suggestions.length - acceptedCount - rejectedCount;
 
+  function accept(s: Suggestion, text?: string) {
+    setRejected((prev) => {
+      const next = new Set(prev);
+      next.delete(s.id);
+      return next;
+    });
+    setApplied((prev) => [
+      ...prev.filter((e) => e.suggestionId !== s.id),
+      {
+        suggestionId: s.id,
+        sectionId: s.sectionId,
+        original: s.original,
+        replacement: text ?? s.suggested,
+        jdRequirement: s.jdRequirement,
+        edited: text !== undefined && text !== s.suggested,
+        conservatism,
+      },
+    ]);
+  }
+
+  function reject(s: Suggestion) {
+    setApplied((prev) => prev.filter((e) => e.suggestionId !== s.id));
+    setRejected((prev) => new Set(prev).add(s.id));
+  }
+
+  function undo(s: Suggestion) {
+    setApplied((prev) => prev.filter((e) => e.suggestionId !== s.id));
+    setRejected((prev) => {
+      const next = new Set(prev);
+      next.delete(s.id);
+      return next;
+    });
+  }
+
+  function showInJd(requirement: string) {
+    setJdFocus(requirement);
+    setRail("jd");
+  }
+
+  useEffect(() => {
+    if (jdFocus && rail === "jd") {
+      jdMarkRef.current?.scrollIntoView({ block: "center" });
+    }
+  }, [jdFocus, rail]);
+
+  /**
+   * Read the newline-delimited event stream, applying each section's results
+   * as they arrive. Accepted changes are deliberately left untouched here.
+   */
   async function generate() {
-    setLoading(true);
+    setRunning(true);
     setError(null);
+    setSuggestions([]);
+    setGaps([]);
+    setRejected(new Set());
+    setMeta(null);
+    setProgress(null);
+
     try {
       const res = await fetch("/api/suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cvId, jdText, conservatism }),
       });
-      const json: ApiResponse = await res.json();
+
       if (!res.ok) {
-        setError(json.error ?? "Could not generate suggestions.");
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? "Could not generate suggestions.");
         return;
       }
-      setSuggestions(json.suggestions);
-      setStates(
-        Object.fromEntries(
-          json.suggestions.map((s) => [s.id, { decision: "pending" as const }]),
-        ),
-      );
-      setMeta({
-        droppedInvalid: json.droppedInvalid,
-        failures: json.failures,
-        model: json.model,
-      });
-    } catch {
-      setError("Could not reach the server. Check your connection.");
-    } finally {
-      setLoading(false);
-    }
-  }
+      if (!res.body) {
+        setError("The server returned an empty response.");
+        return;
+      }
 
-  function decide(id: string, decision: Decision, editedText?: string) {
-    setStates((prev) => ({
-      ...prev,
-      [id]: { decision, editedText: editedText ?? prev[id]?.editedText },
-    }));
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event: Record<string, unknown>;
+          try {
+            event = JSON.parse(line);
+          } catch {
+            continue;
+          }
+
+          switch (event.type) {
+            case "progress":
+              setProgress({
+                index: event.index as number,
+                total: event.total as number,
+                heading: event.heading as string,
+              });
+              break;
+            case "section":
+              setSuggestions((prev) => [
+                ...prev,
+                ...(event.suggestions as Suggestion[]),
+              ]);
+              setGaps((prev) => [...prev, ...(event.gaps as Gap[])]);
+              break;
+            case "fatal":
+              setError(event.error as string);
+              break;
+            case "done":
+              setMeta({
+                droppedInvalid: event.droppedInvalid as number,
+                failures: event.failures as {
+                  sectionId: string;
+                  reason: string;
+                }[],
+                model: event.model as string,
+              });
+              break;
+          }
+        }
+      }
+    } catch {
+      setError("Lost connection while analysing. Your accepted changes are safe.");
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
   }
 
   async function exportPdf() {
     setExporting(true);
     setExportNote(null);
     try {
-      const replacements = suggestions
-        .filter((s) => states[s.id]?.decision === "accepted")
-        .map((s) => ({
-          original: s.original,
-          replacement: states[s.id]?.editedText ?? s.suggested,
-        }));
-
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cvId, replacements, fullText: workingCv }),
+        body: JSON.stringify({
+          cvId,
+          stepId,
+          conservatism,
+          replacements: applied.map((e) => ({
+            original: e.original,
+            replacement: e.replacement,
+          })),
+          fullText: workingCv,
+        }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -168,7 +302,7 @@ export default function ReviewClient({
       URL.revokeObjectURL(url);
       setExportNote(
         unplaced > 0
-          ? `Downloaded. Note: ${unplaced} accepted change${unplaced === 1 ? "" : "s"} could not be placed back into the original layout and ${unplaced === 1 ? "is" : "are"} missing from the PDF.`
+          ? `Downloaded. ${unplaced} accepted change${unplaced === 1 ? "" : "s"} could not be placed back into your original layout and ${unplaced === 1 ? "is" : "are"} missing from the PDF.`
           : "Downloaded.",
       );
     } catch {
@@ -188,252 +322,518 @@ export default function ReviewClient({
     return map;
   }, [suggestions]);
 
+  const gapsBySection = useMemo(() => {
+    const map = new Map<string, Gap[]>();
+    for (const g of gaps) {
+      const list = map.get(g.sectionId) ?? [];
+      list.push(g);
+      map.set(g.sectionId, list);
+    }
+    return map;
+  }, [gaps]);
+
   const level = CONSERVATISM_LEVELS.find((l) => l.value === conservatism)!;
+  const hasRun = meta !== null || suggestions.length > 0;
 
   return (
-    <main className="mx-auto grid w-full max-w-6xl flex-1 gap-10 px-6 py-10 lg:grid-cols-[minmax(0,1fr)_380px]">
-      {/* ── Suggestions column ─────────────────────────────── */}
-      <div className="flex flex-col gap-8">
-        <section className="border border-border bg-surface p-6">
-          <p className="label-caps">Step 03</p>
-          <h1 className="mt-1 font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Review suggestions
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Each suggestion below names the job-description requirement it
-            addresses and why it helps. Nothing changes your CV until you accept
-            it, and you can undo any decision.
-          </p>
-
-          <div className="mt-6">
-            <label
-              htmlFor="conservatism"
-              className="label-caps !text-foreground"
-            >
-              How assertive should suggestions be?
-            </label>
-            <input
-              id="conservatism"
-              type="range"
-              min={1}
-              max={5}
-              step={1}
-              value={conservatism}
-              onChange={(e) =>
-                setConservatism(Number(e.target.value) as ConservatismLevel)
-              }
-              className="mt-3 w-full accent-[var(--accent)]"
-              aria-describedby="conservatism-hint"
-            />
-            <div className="mt-1 flex justify-between text-xs text-faint-foreground">
-              <span>Conservative</span>
-              <span>Assertive</span>
-            </div>
-            <p id="conservatism-hint" className="mt-2 text-sm text-foreground">
-              <strong>{level.label}</strong>{" "}
-              <span className="text-muted-foreground">— {level.hint}</span>
+    <>
+      <main className="mx-auto grid w-full max-w-6xl flex-1 gap-8 px-4 pb-28 pt-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-10 lg:pb-10">
+        {/* ── Suggestions column ─────────────────────────────── */}
+        <div className="flex min-w-0 flex-col gap-8">
+          <section className="border border-border bg-surface p-5 sm:p-6">
+            <p className="label-caps">Step 03</p>
+            <h1 className="mt-1 font-serif text-2xl font-semibold tracking-tight text-foreground">
+              Review suggestions
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Each suggestion names the job-description requirement it addresses
+              and why it helps. Nothing changes your CV until you accept it, and
+              you can undo any decision.
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              At every level the assistant may only rework what your CV already
-              says.
-            </p>
-          </div>
 
-          <button
-            onClick={generate}
-            disabled={loading}
-            className="mt-5 h-11 cursor-pointer bg-primary px-6 font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50"
-          >
-            {loading
-              ? "Analysing each section…"
-              : suggestions.length
-                ? "Regenerate at this level"
-                : "Get suggestions"}
-          </button>
-          {loading && (
-            <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
-              Each section is analysed separately against the job description.
-              This can take a minute.
-            </p>
-          )}
-          {suggestions.length > 0 && !loading && (
-            <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">
-              Regenerating replaces the current suggestions. Changes you have
-              already accepted stay in your working CV.
-            </p>
-          )}
-        </section>
-
-        {error && (
-          <div
-            role="alert"
-            className="border-l-2 border-danger bg-danger-soft p-4"
-          >
-            <p className="font-semibold text-danger">
-              Couldn’t generate suggestions
-            </p>
-            <p className="mt-0.5 text-sm leading-relaxed text-danger">{error}</p>
-          </div>
-        )}
-
-        {meta && (
-          <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-border py-3 text-sm text-muted-foreground">
-            <span>
-              <strong className="text-foreground">{acceptedCount}</strong>{" "}
-              accepted
-            </span>
-            <span>
-              <strong className="text-foreground">{rejectedCount}</strong>{" "}
-              rejected
-            </span>
-            <span>
-              <strong className="text-foreground">{pendingCount}</strong>{" "}
-              undecided
-            </span>
-            <span className="ml-auto font-mono text-xs">{meta.model}</span>
-          </div>
-        )}
-
-        {meta && (meta.droppedInvalid > 0 || meta.failures.length > 0) && (
-          <div className="border-l-2 border-warning bg-warning-soft p-4 text-sm leading-relaxed text-warning">
-            {meta.droppedInvalid > 0 && (
-              <p>
-                {meta.droppedInvalid} proposed change
-                {meta.droppedInvalid === 1 ? " was" : "s were"} discarded for
-                not meeting the transparency rules (a suggestion must quote your
-                real text, explain itself, and cite a job-description
-                requirement).
-              </p>
-            )}
-            {meta.failures.length > 0 && (
-              <p className={meta.droppedInvalid > 0 ? "mt-1" : ""}>
-                {meta.failures.length} section
-                {meta.failures.length === 1 ? "" : "s"} could not be analysed:{" "}
-                {meta.failures[0].reason}
-              </p>
-            )}
-          </div>
-        )}
-
-        {suggestions.length === 0 && meta && !loading && (
-          <div className="border border-border bg-surface p-6">
-            <p className="font-serif text-lg font-semibold text-foreground">
-              No suggestions for this job description
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              At this conservatism level the assistant found nothing it could
-              improve without inventing content. Try a more assertive level, or
-              a job description with more detail.
-            </p>
-          </div>
-        )}
-
-        {[...grouped.entries()].map(([sectionId, list]) => {
-          const section = initialSections.find((s) => s.id === sectionId);
-          return (
-            <section key={sectionId} className="flex flex-col gap-4">
-              <div className="flex items-baseline gap-3 border-b border-border pb-2">
-                <span className="label-caps !text-accent">
-                  {SECTION_LABEL[section?.kind ?? "other"] ?? "Section"}
-                </span>
-                <h2 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-                  {section?.heading || "Section"}
-                </h2>
-                <span className="ml-auto text-sm text-muted-foreground">
-                  {list.length} suggestion{list.length === 1 ? "" : "s"}
-                </span>
+            <div className="mt-6">
+              <label
+                htmlFor="conservatism"
+                className="label-caps !text-foreground"
+              >
+                How assertive should suggestions be?
+              </label>
+              <input
+                id="conservatism"
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={conservatism}
+                disabled={running}
+                onChange={(e) =>
+                  setConservatism(Number(e.target.value) as ConservatismLevel)
+                }
+                className="mt-3 w-full accent-[var(--accent)] disabled:opacity-50"
+                aria-describedby="conservatism-hint"
+              />
+              <div className="mt-1 flex justify-between text-xs text-faint-foreground">
+                <span>Conservative</span>
+                <span>Assertive</span>
               </div>
+              <p id="conservatism-hint" className="mt-2 text-sm text-foreground">
+                <strong>{level.label}</strong>{" "}
+                <span className="text-muted-foreground">— {level.hint}</span>
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                At every level the assistant may only rework what your CV
+                already says.
+              </p>
+            </div>
 
-              {list.map((s) => (
-                <SuggestionCard
-                  key={s.id}
-                  suggestion={s}
-                  state={states[s.id] ?? { decision: "pending" }}
-                  editingText={editing[s.id]}
-                  unappliable={unappliable.includes(s.id)}
-                  onStartEdit={() =>
-                    setEditing((p) => ({
-                      ...p,
-                      [s.id]: states[s.id]?.editedText ?? s.suggested,
-                    }))
-                  }
-                  onEditChange={(v) => setEditing((p) => ({ ...p, [s.id]: v }))}
-                  onCancelEdit={() =>
-                    setEditing((p) => {
-                      const n = { ...p };
-                      delete n[s.id];
-                      return n;
-                    })
-                  }
-                  onSaveEdit={() => {
-                    decide(s.id, "accepted", editing[s.id]);
-                    setEditing((p) => {
-                      const n = { ...p };
-                      delete n[s.id];
-                      return n;
-                    });
-                  }}
-                  onAccept={() => decide(s.id, "accepted")}
-                  onReject={() => decide(s.id, "rejected")}
-                  onUndo={() => decide(s.id, "pending")}
-                />
-              ))}
-            </section>
-          );
-        })}
-      </div>
-
-      {/* ── Working CV column ──────────────────────────────── */}
-      <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:h-fit">
-        <div className="border border-border bg-surface">
-          <div className="border-b border-border px-5 py-3">
-            <p className="label-caps">Live</p>
-            <h2 className="font-serif text-lg font-semibold tracking-tight text-foreground">
-              Your working CV
-            </h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Updates as you accept changes. Your original is never overwritten.
-            </p>
-          </div>
-          <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[13px] leading-relaxed text-foreground">
-            {workingCv}
-          </pre>
-          <div className="border-t border-border px-5 py-4">
             <button
-              onClick={exportPdf}
-              disabled={exporting}
-              className="h-11 w-full cursor-pointer bg-primary font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+              onClick={generate}
+              disabled={running}
+              className="mt-5 h-11 w-full cursor-pointer bg-primary px-6 font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50 sm:w-auto"
             >
-              {exporting ? "Building PDF…" : "Download as PDF"}
+              {running
+                ? "Analysing…"
+                : hasRun
+                  ? "Regenerate at this level"
+                  : "Get suggestions"}
             </button>
-            <p className="mt-2 text-xs leading-relaxed text-faint-foreground">
-              {format === "pdf"
-                ? "Your PDF upload is re-laid out into a clean template."
-                : format === "tex"
-                  ? "Exported from your original LaTeX source — formatting preserved."
-                  : "Exported from your original Word file — styles preserved."}
-            </p>
+
+            {running && progress && (
+              <div className="mt-4" aria-live="polite">
+                <div className="flex items-baseline justify-between text-sm">
+                  <span className="text-foreground">
+                    Analysing{" "}
+                    <strong className="font-semibold">{progress.heading}</strong>
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {progress.index + 1} of {progress.total}
+                  </span>
+                </div>
+                <div
+                  className="mt-2 h-1.5 w-full overflow-hidden bg-border"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={progress.total}
+                  aria-valuenow={progress.index}
+                  aria-label="Sections analysed"
+                >
+                  <div
+                    className="h-full bg-accent transition-[width] duration-300"
+                    style={{
+                      width: `${(progress.index / progress.total) * 100}%`,
+                    }}
+                  />
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                  Sections are analysed one at a time against the job
+                  description. Results appear as each one finishes.
+                </p>
+              </div>
+            )}
+
+            {hasRun && !running && (
+              <>
+                <p
+                  className="mt-3 text-sm text-muted-foreground"
+                  aria-live="polite"
+                >
+                  Regenerating proposes a fresh set at the new level. Changes you
+                  have already accepted stay in your working CV.
+                </p>
+                <p className="mt-2 hidden text-xs text-faint-foreground sm:block">
+                  With a suggestion focused: <Key>A</Key> accept, <Key>E</Key>{" "}
+                  edit, <Key>R</Key> reject, <Key>U</Key> undo.
+                </p>
+              </>
+            )}
+          </section>
+
+          {error && (
+            <div
+              role="alert"
+              className="border-l-2 border-danger bg-danger-soft p-4"
+            >
+              <p className="font-semibold text-danger">
+                Couldn’t generate suggestions
+              </p>
+              <p className="mt-0.5 text-sm leading-relaxed text-danger">
+                {error}
+              </p>
+              <button
+                onClick={generate}
+                className="mt-3 h-9 cursor-pointer border border-danger px-4 text-sm font-semibold text-danger transition-colors duration-150 hover:bg-danger/10"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {meta && (meta.droppedInvalid > 0 || meta.failures.length > 0) && (
+            <div className="border-l-2 border-warning bg-warning-soft p-4 text-sm leading-relaxed text-warning">
+              {meta.droppedInvalid > 0 && (
+                <p>
+                  {meta.droppedInvalid} proposed change
+                  {meta.droppedInvalid === 1 ? " was" : "s were"} discarded for
+                  not meeting the transparency rules — a suggestion must quote
+                  your real text, explain itself, and cite a job-description
+                  requirement.
+                </p>
+              )}
+              {meta.failures.length > 0 && (
+                <p className={meta.droppedInvalid > 0 ? "mt-1" : ""}>
+                  {meta.failures.length} section
+                  {meta.failures.length === 1 ? "" : "s"} could not be analysed:{" "}
+                  {meta.failures[0].reason}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!hasRun && !running && !error && (
+            <div className="border border-dashed border-border-strong bg-surface p-8 text-center">
+              <p className="font-serif text-lg font-semibold text-foreground">
+                Nothing analysed yet
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
+                Choose how assertive you want the assistant to be, then ask for
+                suggestions. Your CV is not changed until you accept something.
+              </p>
+            </div>
+          )}
+
+          {hasRun && suggestions.length === 0 && !running && (
+            <div className="border border-border bg-surface p-6">
+              <p className="font-serif text-lg font-semibold text-foreground">
+                No suggestions for this job description
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                At this level the assistant found nothing it could improve
+                without inventing content. Try a more assertive level, or a job
+                description with more detail.
+              </p>
+            </div>
+          )}
+
+          {[...grouped.entries()].map(([sectionId, list]) => {
+            const section = initialSections.find((s) => s.id === sectionId);
+            const sectionGaps = gapsBySection.get(sectionId) ?? [];
+            return (
+              <section key={sectionId} className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border pb-2">
+                  <span className="label-caps !text-accent">
+                    {SECTION_LABEL[section?.kind ?? "other"] ?? "Section"}
+                  </span>
+                  <h2 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                    {section?.heading || "Section"}
+                  </h2>
+                  <span className="ml-auto text-sm text-muted-foreground">
+                    {list.length} suggestion{list.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                {list.map((s) => (
+                  <SuggestionCard
+                    key={s.id}
+                    suggestion={s}
+                    decision={decisionOf(s.id)}
+                    appliedEdit={applied.find((e) => e.suggestionId === s.id)}
+                    editingText={editing[s.id]}
+                    unappliable={unappliable(s)}
+                    onShowInJd={() => showInJd(s.jdRequirement)}
+                    onStartEdit={() =>
+                      setEditing((p) => ({
+                        ...p,
+                        [s.id]:
+                          applied.find((e) => e.suggestionId === s.id)
+                            ?.replacement ?? s.suggested,
+                      }))
+                    }
+                    onEditChange={(v) =>
+                      setEditing((p) => ({ ...p, [s.id]: v }))
+                    }
+                    onCancelEdit={() =>
+                      setEditing((p) => {
+                        const n = { ...p };
+                        delete n[s.id];
+                        return n;
+                      })
+                    }
+                    onSaveEdit={() => {
+                      accept(s, editing[s.id]);
+                      setEditing((p) => {
+                        const n = { ...p };
+                        delete n[s.id];
+                        return n;
+                      });
+                    }}
+                    onAccept={() => accept(s)}
+                    onReject={() => reject(s)}
+                    onUndo={() => undo(s)}
+                  />
+                ))}
+
+                {sectionGaps.length > 0 && (
+                  <div className="border border-dashed border-border-strong bg-background p-4">
+                    <p className="label-caps">Not evidenced in this section</p>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                      The assistant will not invent these. Add them yourself
+                      only if they are genuinely true of you.
+                    </p>
+                    <ul className="mt-3 flex flex-col gap-2">
+                      {sectionGaps.map((g) => (
+                        <li key={g.id} className="text-sm leading-relaxed">
+                          <button
+                            type="button"
+                            onClick={() => showInJd(g.jdRequirement)}
+                            className="cursor-pointer border border-border-strong bg-surface px-2 py-0.5 text-left text-xs font-semibold text-foreground transition-colors duration-150 hover:border-accent"
+                          >
+                            {g.jdRequirement}
+                          </button>
+                          <span className="ml-2 text-muted-foreground">
+                            {g.note}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+
+        {/* ── Right rail: working CV / job description ────────── */}
+        <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:h-fit">
+          <div className="border border-border bg-surface">
+            <div
+              className="flex border-b border-border"
+              role="tablist"
+              aria-label="Reference panel"
+            >
+              <RailTab
+                active={rail === "cv"}
+                onClick={() => setRail("cv")}
+                label="Your working CV"
+              />
+              <RailTab
+                active={rail === "jd"}
+                onClick={() => setRail("jd")}
+                label="Job description"
+              />
+            </div>
+
+            {rail === "cv" ? (
+              <>
+                <p className="border-b border-border px-5 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {applied.length === 0
+                    ? "Unchanged so far. Your original is never overwritten."
+                    : `${applied.length} change${applied.length === 1 ? "" : "s"} applied. Your original is never overwritten.`}
+                </p>
+                <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[13px] leading-relaxed text-foreground">
+                  {workingCv}
+                </pre>
+                <p className="border-t border-border px-5 py-3 text-xs leading-relaxed text-faint-foreground">
+                  {format === "pdf"
+                    ? "On export, your PDF upload is re-laid out into a clean template — the original visual design is not reproduced."
+                    : format === "tex"
+                      ? "On export, changes are spliced into your original LaTeX source and recompiled — formatting is preserved."
+                      : "On export, changes are written back into your original Word file — paragraph and run styles are preserved."}
+                </p>
+              </>
+            ) : (
+              <JdPanel
+                jdText={jdText}
+                focus={jdFocus}
+                markRef={jdMarkRef}
+                onClear={() => setJdFocus(null)}
+              />
+            )}
+          </div>
+          <p className="text-xs text-faint-foreground">
+            Session {stepId.slice(-8)}
+            {meta && <span className="ml-2 font-mono">{meta.model}</span>}
+          </p>
+        </aside>
+      </main>
+
+      {/* ── Sticky decision + export bar ────────────────────── */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 backdrop-blur-sm lg:sticky">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <span className="text-muted-foreground">
+              <strong className="text-foreground">{applied.length}</strong>{" "}
+              applied
+            </span>
+            {hasRun && (
+              <>
+                <span className="text-muted-foreground">
+                  <strong className="text-foreground">{rejectedCount}</strong>{" "}
+                  rejected
+                </span>
+                <span className="text-muted-foreground">
+                  <strong className="text-foreground">{pendingCount}</strong>{" "}
+                  undecided
+                </span>
+              </>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-3">
             {exportNote && (
               <p
-                className="mt-2 text-xs leading-relaxed text-foreground"
+                className="hidden max-w-xs text-xs leading-relaxed text-muted-foreground sm:block"
                 aria-live="polite"
               >
                 {exportNote}
               </p>
             )}
+            <button
+              onClick={exportPdf}
+              disabled={exporting}
+              className="h-10 cursor-pointer bg-primary px-5 text-sm font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+            >
+              {exporting ? "Building PDF…" : "Download as PDF"}
+            </button>
           </div>
+          {exportNote && (
+            <p
+              className="w-full text-xs leading-relaxed text-muted-foreground sm:hidden"
+              aria-live="polite"
+            >
+              {exportNote}
+            </p>
+          )}
         </div>
-        <p className="text-xs text-faint-foreground">Session {stepId.slice(-8)}</p>
-      </aside>
-    </main>
+      </div>
+    </>
+  );
+}
+
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="border border-border-strong bg-background px-1 font-mono text-[10px] font-semibold text-muted-foreground">
+      {children}
+    </kbd>
+  );
+}
+
+function RailTab({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex-1 cursor-pointer px-4 py-3 text-sm font-semibold transition-colors duration-150 ${
+        active
+          ? "border-b-2 border-accent text-foreground"
+          : "border-b-2 border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** The job description, with the cited requirement highlighted in place. */
+function JdPanel({
+  jdText,
+  focus,
+  markRef,
+  onClear,
+}: {
+  jdText: string;
+  focus: string | null;
+  markRef: React.RefObject<HTMLElement | null>;
+  onClear: () => void;
+}) {
+  const span = focus ? findInJd(jdText, focus) : null;
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border px-5 py-2">
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {focus
+            ? span
+              ? "Highlighted: the requirement this suggestion cites."
+              : "That requirement is a paraphrase — no exact match in the text."
+            : "The job description your CV is being aligned against."}
+        </p>
+        {focus && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="ml-auto shrink-0 cursor-pointer text-xs font-semibold text-accent underline-offset-2 hover:underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[13px] leading-relaxed text-foreground">
+        {span ? (
+          <>
+            {jdText.slice(0, span.start)}
+            <mark
+              ref={markRef as React.RefObject<HTMLElement>}
+              className="bg-accent-soft font-semibold text-accent"
+            >
+              {jdText.slice(span.start, span.end)}
+            </mark>
+            {jdText.slice(span.end)}
+          </>
+        ) : (
+          jdText
+        )}
+      </pre>
+    </>
+  );
+}
+
+/** Word-level diff of the proposed change. */
+function DiffView({ original, suggested }: { original: string; suggested: string }) {
+  const ops = useMemo(
+    () => wordDiff(original, suggested),
+    [original, suggested],
+  );
+  return (
+    <p className="text-sm leading-relaxed text-foreground">
+      {ops.map((op, i) =>
+        op.kind === "equal" ? (
+          <span key={i}>{op.text}</span>
+        ) : op.kind === "delete" ? (
+          <del
+            key={i}
+            className="bg-danger-soft text-danger decoration-danger/50"
+          >
+            {op.text}
+          </del>
+        ) : (
+          <ins
+            key={i}
+            className="bg-accent-soft font-medium text-accent no-underline"
+          >
+            {op.text}
+          </ins>
+        ),
+      )}
+    </p>
   );
 }
 
 function SuggestionCard({
   suggestion: s,
-  state,
+  decision,
+  appliedEdit,
   editingText,
   unappliable,
+  onShowInJd,
   onStartEdit,
   onEditChange,
   onCancelEdit,
@@ -443,9 +843,11 @@ function SuggestionCard({
   onUndo,
 }: {
   suggestion: Suggestion;
-  state: SuggestionState;
+  decision: Decision;
+  appliedEdit?: AppliedEdit;
   editingText?: string;
   unappliable: boolean;
+  onShowInJd: () => void;
   onStartEdit: () => void;
   onEditChange: (v: string) => void;
   onCancelEdit: () => void;
@@ -455,15 +857,44 @@ function SuggestionCard({
   onUndo: () => void;
 }) {
   const isEditing = editingText !== undefined;
-  const applied = state.editedText ?? s.suggested;
-  const decided = state.decision !== "pending";
+  const applied = appliedEdit?.replacement ?? s.suggested;
+  const decided = decision !== "pending";
+
+  /**
+   * Keyboard shortcuts act on the focused card only, and never while the user
+   * is typing in the edit box — a global handler would swallow real input.
+   */
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (isEditing) return;
+    const target = e.target as HTMLElement;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    const k = e.key.toLowerCase();
+    if (k === "a" && !decided) {
+      e.preventDefault();
+      onAccept();
+    } else if (k === "r" && !decided) {
+      e.preventDefault();
+      onReject();
+    } else if (k === "e" && !decided) {
+      e.preventDefault();
+      onStartEdit();
+    } else if (k === "u" && decided) {
+      e.preventDefault();
+      onUndo();
+    }
+  }
 
   return (
     <article
-      className={`border bg-surface p-5 ${
-        state.decision === "accepted"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      aria-label={`Suggestion addressing ${s.jdRequirement}`}
+      className={`border bg-surface p-4 transition-colors duration-150 sm:p-5 ${
+        decision === "accepted"
           ? "border-accent"
-          : state.decision === "rejected"
+          : decision === "rejected"
             ? "border-border opacity-60"
             : "border-border"
       }`}
@@ -471,45 +902,54 @@ function SuggestionCard({
       {/* Transparency: the JD requirement is stated before the change itself. */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="label-caps !text-accent">Addresses</span>
-        <span className="border border-accent/40 bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent">
+        <button
+          type="button"
+          onClick={onShowInJd}
+          title="Show this requirement in the job description"
+          className="cursor-pointer border border-accent/40 bg-accent-soft px-2 py-0.5 text-left text-xs font-semibold text-accent transition-colors duration-150 hover:border-accent"
+        >
           {s.jdRequirement}
-        </span>
-        {state.decision === "accepted" && (
+        </button>
+        {decision === "accepted" && (
           <span className="ml-auto text-xs font-semibold text-success">
-            {state.editedText ? "Accepted (edited)" : "Accepted"}
+            {appliedEdit?.edited ? "Accepted (edited)" : "Accepted"}
           </span>
         )}
-        {state.decision === "rejected" && (
+        {decision === "rejected" && (
           <span className="ml-auto text-xs font-semibold text-muted-foreground">
             Rejected
           </span>
         )}
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div>
-          <p className="label-caps">Your text</p>
-          <p className="mt-1 border-l-2 border-border-strong pl-3 text-sm leading-relaxed text-muted-foreground">
-            {s.original}
-          </p>
-        </div>
-        <div>
-          <p className="label-caps">Proposed</p>
+      {/* The change itself, as a diff — what actually differs, not two blocks
+          of prose the user has to compare by eye. */}
+      <div className="mt-4">
+        <p className="label-caps">Proposed change</p>
+        <div className="mt-1 border-l-2 border-border-strong pl-3">
           {isEditing ? (
             <textarea
               value={editingText}
               onChange={(e) => onEditChange(e.target.value)}
               rows={4}
               aria-label="Edit the proposed text"
-              className="mt-1 w-full border border-accent bg-surface p-2 text-sm leading-relaxed text-foreground"
+              autoFocus
+              className="w-full border border-accent bg-surface p-2 text-sm leading-relaxed text-foreground"
             />
           ) : (
-            <p className="mt-1 border-l-2 border-accent pl-3 text-sm leading-relaxed text-foreground">
-              {applied}
-            </p>
+            <DiffView original={s.original} suggested={applied} />
           )}
         </div>
       </div>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">
+          Show your original wording
+        </summary>
+        <p className="mt-2 border-l-2 border-border pl-3 text-sm leading-relaxed text-muted-foreground">
+          {s.original}
+        </p>
+      </details>
 
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
         <span className="font-semibold text-foreground">Why: </span>
@@ -518,8 +958,8 @@ function SuggestionCard({
 
       {unappliable && (
         <p className="mt-3 border-l-2 border-warning bg-warning-soft p-2 text-xs leading-relaxed text-warning">
-          This change overlaps another accepted change and can no longer be
-          applied to your working CV.
+          Your CV no longer contains the wording this suggestion quotes — an
+          earlier accepted change replaced it. It can’t be applied.
         </p>
       )}
 
@@ -528,13 +968,13 @@ function SuggestionCard({
           <>
             <button
               onClick={onSaveEdit}
-              className="h-9 cursor-pointer bg-primary px-4 text-sm font-semibold text-on-primary transition-opacity duration-150 hover:opacity-90"
+              className="h-10 cursor-pointer bg-primary px-4 text-sm font-semibold text-on-primary transition-opacity duration-150 hover:opacity-90"
             >
               Save and accept
             </button>
             <button
               onClick={onCancelEdit}
-              className="h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
+              className="h-10 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
             >
               Cancel
             </button>
@@ -542,7 +982,7 @@ function SuggestionCard({
         ) : decided ? (
           <button
             onClick={onUndo}
-            className="h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
+            className="h-10 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
           >
             Undo
           </button>
@@ -550,19 +990,20 @@ function SuggestionCard({
           <>
             <button
               onClick={onAccept}
-              className="h-9 cursor-pointer bg-primary px-4 text-sm font-semibold text-on-primary transition-opacity duration-150 hover:opacity-90"
+              disabled={unappliable}
+              className="h-10 cursor-pointer bg-primary px-4 text-sm font-semibold text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               Accept
             </button>
             <button
               onClick={onStartEdit}
-              className="h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
+              className="h-10 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
             >
               Edit
             </button>
             <button
               onClick={onReject}
-              className="h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-muted-foreground transition-colors duration-150 hover:bg-background"
+              className="h-10 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-muted-foreground transition-colors duration-150 hover:bg-background"
             >
               Reject
             </button>

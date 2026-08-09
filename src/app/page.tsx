@@ -8,7 +8,7 @@ export default async function Home() {
     <div className="flex min-h-screen flex-col bg-background">
       <div className="h-1 bg-accent" aria-hidden="true" />
       <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-4">
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <p className="truncate font-serif text-lg font-semibold tracking-tight text-foreground">
               CV <span className="text-accent">·</span> JD{" "}
@@ -39,7 +39,7 @@ export default async function Home() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">
+      <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6 sm:py-12">
         <div className="mb-12 max-w-2xl">
           <p className="label-caps">Tailoring, on your terms</p>
           <h1 className="mt-2 font-serif text-[2.5rem] font-semibold leading-[1.15] tracking-tight text-foreground">
@@ -55,7 +55,7 @@ export default async function Home() {
       </main>
 
       <footer className="border-t border-border">
-        <div className="mx-auto w-full max-w-4xl px-6 py-5">
+        <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
           <p className="text-sm leading-relaxed text-faint-foreground">
             MSc research prototype. Your CV and interactions are stored for
             study analysis only — no names or emails beyond your login, and

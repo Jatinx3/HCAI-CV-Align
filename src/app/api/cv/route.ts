@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/session";
 import { detectFormat, extractText } from "@/lib/extract";
 
 export const runtime = "nodejs";
@@ -8,10 +8,11 @@ export const runtime = "nodejs";
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const authed = await requireUser();
+  if (!authed.ok) {
+    return NextResponse.json({ error: authed.error }, { status: authed.status });
   }
+  const user = authed.user;
 
   const formData = await request.formData();
   const file = formData.get("file");
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
 
   const doc = await prisma.cvDocument.create({
     data: {
-      userId: session.user.id,
+      userId: user.id,
       fileName: file.name,
       format,
       data,

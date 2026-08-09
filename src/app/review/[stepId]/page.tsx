@@ -26,7 +26,7 @@ export default async function ReviewPage({
     <div className="flex min-h-screen flex-col bg-background">
       <div className="h-1 bg-accent" aria-hidden="true" />
       <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-6 py-4">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <p className="truncate font-serif text-lg font-semibold tracking-tight text-foreground">
               <Link href="/" className="hover:underline underline-offset-4">

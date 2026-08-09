@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/session";
 import { parseSections, rewritableSections } from "@/lib/sections";
 import {
   buildSystemPrompt,
   buildUserPrompt,
   extractJson,
   isConservatismLevel,
+  validateGaps,
   validateSuggestions,
-  type Suggestion,
 } from "@/lib/suggestions";
 import { activeModel, complete, LlmConfigError, LlmCallError } from "@/lib/llm";
 
@@ -22,12 +22,19 @@ export const maxDuration = 300;
  * independently — never a monolithic rewrite. Suggestions that violate the
  * contract (no explanation, no JD requirement, quoted text absent, no actual
  * change) are dropped by the validator and never reach the user.
+ *
+ * Responds with a stream of newline-delimited JSON events rather than one
+ * final payload, for two reasons. Sections are analysed one at a time, because
+ * firing every section at once is exactly what free-tier providers rate-limit;
+ * and a run takes minutes, so the participant needs to see which section is
+ * being worked on instead of an opaque spinner.
  */
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const authed = await requireUser();
+  if (!authed.ok) {
+    return NextResponse.json({ error: authed.error }, { status: authed.status });
   }
+  const user = authed.user;
 
   let body: { cvId?: string; jdText?: string; conservatism?: number };
   try {
@@ -54,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   const doc = await prisma.cvDocument.findFirst({
-    where: { id: cvId, userId: session.user.id },
+    where: { id: cvId, userId: user.id },
   });
   if (!doc) {
     return NextResponse.json({ error: "CV not found" }, { status: 404 });
@@ -73,69 +80,87 @@ export async function POST(request: Request) {
   }
 
   const system = buildSystemPrompt(conservatism);
-  const suggestions: Suggestion[] = [];
-  const failures: { sectionId: string; reason: string }[] = [];
-  let droppedInvalid = 0;
+  const model = activeModel();
+  const encoder = new TextEncoder();
 
-  // Sections are analysed independently and in parallel; one failing section
-  // must not lose the others.
-  const results = await Promise.allSettled(
-    targets.map(async (section) => {
-      const raw = await complete({
-        system,
-        user: buildUserPrompt(section, jdText),
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      };
+
+      let droppedInvalid = 0;
+      const failures: { sectionId: string; reason: string }[] = [];
+
+      send({
+        type: "start",
+        model,
+        conservatism,
+        total: targets.length,
+        sections: allSections.map((s) => ({
+          id: s.id,
+          kind: s.kind,
+          heading: s.heading,
+        })),
       });
-      return { section, raw };
-    }),
-  );
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const section = targets[i];
-    if (result.status === "rejected") {
-      const err = result.reason;
-      if (err instanceof LlmConfigError) {
-        // Misconfiguration affects every section — fail loudly, not silently.
-        return NextResponse.json({ error: err.message }, { status: 503 });
+      for (let i = 0; i < targets.length; i++) {
+        const section = targets[i];
+        send({
+          type: "progress",
+          sectionId: section.id,
+          heading: section.heading || section.kind,
+          index: i,
+          total: targets.length,
+        });
+
+        try {
+          const raw = await complete({
+            system,
+            user: buildUserPrompt(section, jdText),
+          });
+          const parsed = extractJson(raw);
+          const outcome = validateSuggestions(parsed, section);
+          const gaps = validateGaps(parsed, section);
+          droppedInvalid += outcome.rejected.length;
+
+          send({
+            type: "section",
+            sectionId: section.id,
+            suggestions: outcome.suggestions,
+            gaps,
+            dropped: outcome.rejected.length,
+          });
+        } catch (err) {
+          if (err instanceof LlmConfigError) {
+            // Misconfiguration affects every section — stop, don't grind
+            // through the rest producing identical failures.
+            send({ type: "fatal", error: err.message });
+            controller.close();
+            return;
+          }
+          const reason =
+            err instanceof LlmCallError
+              ? err.message
+              : err instanceof Error && err.message.includes("JSON")
+                ? "Model response was not valid JSON."
+                : "Model call failed.";
+          failures.push({ sectionId: section.id, reason });
+          send({ type: "section_error", sectionId: section.id, reason });
+        }
       }
-      failures.push({
-        sectionId: section.id,
-        reason:
-          err instanceof LlmCallError ? err.message : "Model call failed.",
-      });
-      continue;
-    }
-    try {
-      const parsed = extractJson(result.value.raw);
-      const outcome = validateSuggestions(parsed, section);
-      suggestions.push(...outcome.suggestions);
-      droppedInvalid += outcome.rejected.length;
-    } catch {
-      failures.push({
-        sectionId: section.id,
-        reason: "Model response was not valid JSON.",
-      });
-    }
-  }
 
-  if (suggestions.length === 0 && failures.length === targets.length) {
-    return NextResponse.json(
-      {
-        error:
-          failures[0]?.reason ??
-          "Could not generate suggestions. Please try again.",
-      },
-      { status: 502 },
-    );
-  }
+      send({ type: "done", model, droppedInvalid, failures });
+      controller.close();
+    },
+  });
 
-  return NextResponse.json({
-    sections: allSections,
-    suggestions,
-    // Research transparency: report what was discarded rather than hiding it.
-    droppedInvalid,
-    failures,
-    model: activeModel(),
-    conservatism,
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      // Proxies that buffer would defeat the point of streaming progress.
+      "X-Accel-Buffering": "no",
+    },
   });
 }
