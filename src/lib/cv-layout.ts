@@ -188,10 +188,56 @@ export type CvBlock =
 export type CvDoc = {
   /** First non-empty line, treated as the person's name. */
   name: string;
-  /** Contact-ish lines that appear before the first heading. */
+  /** A professional title under the name, when the header carries one. */
+  subtitle: string | null;
+  /** Contact details that appear before the first heading. */
   contact: string[];
   blocks: CvBlock[];
 };
+
+/**
+ * Break a run of contact details that extraction joined with plain spaces.
+ * A résumé header separates them with icons or bullets; those do not survive,
+ * leaving "+353 87 380 3453 name@example.com linkedin.com/in/x" as one string
+ * in which the reader cannot see where one detail ends and the next begins.
+ */
+export function splitContactRun(line: string): string[] {
+  const t = line.trim();
+  if (!t) return [];
+
+  // A marker is inserted at each boundary and split on, so that spaces inside
+  // one detail — "+353 87 380 3453" — are left intact.
+  const SEP = "\u0000";
+  const parts = t
+    // Separators the document did manage to keep.
+    .replace(/\s*[\u2022\u00b7|]\s*/g, SEP)
+    // Before an email address.
+    // The separator is excluded from the class, or the lookahead matches
+    // across an already-split boundary and cuts the detail before it.
+    .replace(/\s+(?=[^\s@\u0000]+@[^\s@\u0000]+\.[a-z]{2,})/gi, SEP)
+    // Before a URL or a bare domain.
+    .replace(
+      /\s+(?=(https?:\/\/|www\.)|[a-z0-9-]+\.(com|org|net|io|dev|me|co|ie|uk)\b)/gi,
+      SEP,
+    )
+    .split(SEP)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [t];
+}
+
+/** A short line with no contact punctuation — a professional title. */
+function looksLikeTitle(line: string): boolean {
+  const t = line.trim();
+  return (
+    t.length > 0 &&
+    t.length <= 44 &&
+    !/[@\d]/.test(t) &&
+    !/(https?:|www\.|\.com|\.org|\.io|\.dev)/i.test(t) &&
+    !/[•·|]/.test(t)
+  );
+}
 
 /**
  * Structure plain CV text the same way `renderCvTemplate` does: first non-empty
@@ -276,7 +322,14 @@ export function layoutCv(text: string): CvDoc {
     }
     // Lines above the first heading read as contact details, not body copy.
     if (!seenHeading) {
-      contact.push(t);
+      const prev = contact[contact.length - 1];
+      // A phone number wrapped across two lines in the source is still one
+      // number: "…• +353" / "857331590".
+      if (prev && /[\d+]$/.test(prev) && /^\d/.test(t)) {
+        contact[contact.length - 1] = `${prev} ${t}`;
+      } else {
+        contact.push(t);
+      }
       continue;
     }
 
@@ -300,5 +353,16 @@ export function layoutCv(text: string): CvDoc {
   }
   closeList();
 
-  return { name, contact, blocks };
+  // A title directly under the name is a subtitle, not a contact detail.
+  let subtitle: string | null = null;
+  if (contact.length > 0 && looksLikeTitle(contact[0])) {
+    subtitle = contact.shift()!;
+  }
+
+  return {
+    name,
+    subtitle,
+    contact: contact.flatMap(splitContactRun),
+    blocks,
+  };
 }

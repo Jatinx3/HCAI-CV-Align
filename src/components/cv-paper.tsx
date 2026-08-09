@@ -30,10 +30,13 @@ export default function CvPaper({
   return (
     <div className={`cv-mat ${className}`}>
       <article className="cv-paper" aria-label="Your CV as it will be laid out">
-        <h1 className="cv-name">{doc.name}</h1>
-        {doc.contact.length > 0 && (
-          <p className="cv-contact">{doc.contact.join("  ·  ")}</p>
-        )}
+        <header className="cv-header">
+          <h1 className="cv-name">{doc.name}</h1>
+          {doc.subtitle && <p className="cv-subtitle">{doc.subtitle}</p>}
+          {doc.contact.length > 0 && (
+            <p className="cv-contact">{doc.contact.join("  ·  ")}</p>
+          )}
+        </header>
 
         {doc.blocks.map((block, i) => {
           if (block.kind === "heading") {

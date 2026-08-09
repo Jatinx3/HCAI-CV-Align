@@ -1,11 +1,5 @@
 import { compileTex, escapeTexText } from "./tex";
-import {
-  BULLET,
-  isHeading,
-  normaliseHeading,
-  splitEntry,
-  unwrapLines,
-} from "../cv-layout";
+import { layoutCv, type CvBlock } from "../cv-layout";
 
 /**
  * .pdf path — best effort, explicit reformat. The rewritten plain text is
@@ -13,80 +7,31 @@ import {
  * This is disclosed to the user at upload time: a PDF upload is reformatted,
  * not cloned.
  *
- * Heuristics on the plain text:
- * - first non-empty line = name (title)
- * - short ALL-CAPS or Title-Case-only lines = section headings
- * - lines starting with a bullet marker = itemized lists
+ * The structure comes from layoutCv, the same function the on-screen preview
+ * renders from. Both used to walk the lines themselves and repeatedly drifted
+ * apart — one would treat a line as a heading while the other set it as body
+ * text — so the document a participant reviewed was not the one they
+ * downloaded. There is now a single description of the CV and two renderers
+ * for it.
  */
 
 export function renderCvTemplate(text: string): string {
-  const raw = text.replace(/\r\n/g, "\n").split("\n");
+  const doc = layoutCv(text);
 
-  // First non-empty line is treated as the person's name.
-  let nameIdx = raw.findIndex((l) => l.trim().length > 0);
-  if (nameIdx === -1) nameIdx = 0;
-  const name = escapeTexText(raw[nameIdx]?.trim() ?? "Curriculum Vitae");
-
-  // Same unwrapping as the on-screen preview, so the download matches it —
-  // applied below the name only, mirroring layoutCv.
-  const lines = [raw[nameIdx] ?? "", ...unwrapLines(raw.slice(nameIdx + 1))];
-  nameIdx = 0;
-
-  const body: string[] = [];
-  let inList = false;
-  let lastWasEntry = false;
-  const closeList = () => {
-    if (inList) {
-      body.push("\\end{itemize}");
-      inList = false;
-    }
-  };
-
-  for (let i = nameIdx + 1; i < lines.length; i++) {
-    const raw = lines[i];
-    const t = raw.trim();
-    if (!t) {
-      closeList();
-      body.push("");
-      continue;
-    }
-    if (isHeading(t)) {
-      closeList();
-      body.push(`\\cvsection{${escapeTexText(normaliseHeading(t))}}`);
-      lastWasEntry = false;
-      continue;
-    }
-    if (BULLET.test(t)) {
-      if (!inList) {
-        body.push("\\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]");
-        inList = true;
-      }
-      body.push(`\\item ${escapeTexText(t.replace(BULLET, ""))}`);
-      // Bullets end an entry pair: the next title is a new role, not the
-      // sub-line of the previous one.
-      lastWasEntry = false;
-      continue;
-    }
-    closeList();
-
-    // Restore the two-column entry row that text extraction flattened.
-    const entry = splitEntry(t);
-    if (entry) {
-      const left = escapeTexText(entry.left);
-      const right = escapeTexText(entry.right);
-      body.push(
-        lastWasEntry
-          ? `\\textit{${left}}\\hfill\\textit{${right}}\\par`
-          : `\\textbf{${left}}\\hfill\\textbf{${right}}\\par`,
-      );
-      lastWasEntry = !lastWasEntry;
-      continue;
-    }
-
-    lastWasEntry = false;
-    body.push(`${escapeTexText(t)}\\par`);
+  const header: string[] = [
+    "\\begin{center}",
+    `{\\LARGE\\bfseries ${escapeTexText(doc.name)}}`,
+  ];
+  if (doc.subtitle) {
+    header.push(`\\\\[3pt]{\\large ${escapeTexText(doc.subtitle)}}`);
   }
-  closeList();
+  if (doc.contact.length > 0) {
+    const line = doc.contact
+      .map((c) => escapeTexText(c))
+      .join(" $\\cdot$ ");
+    header.push(`\\\\[4pt]{\\small ${line}}`);
+  }
+  header.push("\\end{center}");
 
   return `\\documentclass[10pt]{article}
 \\usepackage[a4paper,margin=2.2cm]{geometry}
@@ -94,17 +39,40 @@ export function renderCvTemplate(text: string): string {
 \\usepackage{lmodern}
 \\usepackage{enumitem}
 \\usepackage{xcolor}
-\\usepackage{titlesec}
 \\definecolor{rule}{HTML}{888888}
 \\newcommand{\\cvsection}[1]{\\vspace{6pt}{\\large\\bfseries #1}\\\\[-8pt]{\\color{rule}\\rule{\\linewidth}{0.4pt}}\\vspace{2pt}}
 \\setlength{\\parindent}{0pt}
 \\setlength{\\parskip}{3pt}
 \\pagestyle{empty}
 \\begin{document}
-{\\LARGE\\bfseries ${name}}\\\\[10pt]
-${body.join("\n")}
+${header.join("\n")}
+${doc.blocks.map(renderBlock).join("\n")}
 \\end{document}
 `;
+}
+
+function renderBlock(block: CvBlock): string {
+  switch (block.kind) {
+    case "heading":
+      return `\\cvsection{${escapeTexText(block.text)}}`;
+    case "entry": {
+      const left = escapeTexText(block.left);
+      const right = escapeTexText(block.right);
+      // The sub-line of an entry — an institution under a degree, an employer
+      // under a role — is set in italic, as résumé layouts do.
+      return block.secondary
+        ? `\\textit{${left}}\\hfill\\textit{${right}}\\par`
+        : `\\textbf{${left}}\\hfill\\textbf{${right}}\\par`;
+    }
+    case "list":
+      return [
+        "\\begin{itemize}[leftmargin=1.2em,itemsep=1pt,topsep=2pt]",
+        ...block.items.map((item) => `\\item ${escapeTexText(item)}`),
+        "\\end{itemize}",
+      ].join("\n");
+    case "paragraph":
+      return `${escapeTexText(block.text)}\\par`;
+  }
 }
 
 /** Render rewritten plain text into a clean standard resume PDF. */
