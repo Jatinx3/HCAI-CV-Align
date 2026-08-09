@@ -5,6 +5,7 @@ import type { CvSection } from "@/lib/sections";
 import { assembleCv } from "@/lib/sections";
 import { wordDiff, findInJd } from "@/lib/diff";
 import { applyReplacement, containsOriginal } from "@/lib/anchor";
+import CvPaper from "@/components/cv-paper";
 import {
   CONSERVATISM_LEVELS,
   type ConservatismLevel,
@@ -80,6 +81,12 @@ export default function ReviewClient({
   const [exportNote, setExportNote] = useState<string | null>(null);
 
   const [rail, setRail] = useState<"cv" | "jd">("cv");
+  const [cvView, setCvView] = useState<"document" | "text">("document");
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  /** The CV text this preview was compiled from; a later edit makes it stale. */
+  const [pdfFor, setPdfFor] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [jdFocus, setJdFocus] = useState<string | null>(null);
   const jdMarkRef = useRef<HTMLElement | null>(null);
 
@@ -268,6 +275,54 @@ export default function ReviewClient({
       setProgress(null);
     }
   }
+
+  /**
+   * Compile the real PDF and show it inline. Deliberately omits stepId: this
+   * is a preview, and previewing must not record the participant as having
+   * finished the step.
+   */
+  async function previewPdf() {
+    setPdfLoading(true);
+    setPdfError(null);
+    try {
+      const res = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cvId,
+          replacements: applied.map((e) => ({
+            original: e.original,
+            replacement: e.replacement,
+          })),
+          fullText: workingCv,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setPdfError(j.error ?? "Could not build the preview.");
+        return;
+      }
+      const blob = await res.blob();
+      setPdfUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return URL.createObjectURL(blob);
+      });
+      setPdfFor(workingCv);
+    } catch {
+      setPdfError("Could not build the preview. Check your connection.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
+  function closePdf() {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(null);
+    setPdfFor(null);
+  }
+
+  // A preview compiled before the latest decision would misrepresent the CV.
+  const pdfCurrent = pdfUrl !== null && pdfFor === workingCv;
 
   async function exportPdf() {
     setExporting(true);
@@ -624,21 +679,59 @@ export default function ReviewClient({
 
             {rail === "cv" ? (
               <>
-                <p className="border-b border-border px-5 py-2 text-xs leading-relaxed text-muted-foreground">
-                  {applied.length === 0
-                    ? "Unchanged so far. Your original is never overwritten."
-                    : `${applied.length} change${applied.length === 1 ? "" : "s"} applied. Your original is never overwritten.`}
-                </p>
-                <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[13px] leading-relaxed text-foreground">
-                  {workingCv}
-                </pre>
-                <p className="border-t border-border px-5 py-3 text-xs leading-relaxed text-faint-foreground">
-                  {format === "pdf"
-                    ? "On export, your PDF upload is re-laid out into a clean template — the original visual design is not reproduced."
-                    : format === "tex"
-                      ? "On export, changes are spliced into your original LaTeX source and recompiled — formatting is preserved."
-                      : "On export, changes are written back into your original Word file — paragraph and run styles are preserved."}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {applied.length === 0
+                      ? "Unchanged so far. Your original is never overwritten."
+                      : `${applied.length} change${applied.length === 1 ? "" : "s"} applied.`}
+                  </p>
+                  <div className="ml-auto flex gap-1">
+                    <ViewToggle
+                      active={cvView === "document"}
+                      onClick={() => setCvView("document")}
+                      label="Document"
+                    />
+                    <ViewToggle
+                      active={cvView === "text"}
+                      onClick={() => setCvView("text")}
+                      label="Text"
+                    />
+                  </div>
+                </div>
+
+                {cvView === "document" ? (
+                  <CvPaper
+                    text={workingCv}
+                    highlights={applied.map((e) => e.replacement)}
+                    className="max-h-[50vh]"
+                  />
+                ) : (
+                  <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[13px] leading-relaxed text-foreground">
+                    {workingCv}
+                  </pre>
+                )}
+
+                <div className="border-t border-border px-5 py-3">
+                  <p className="text-xs leading-relaxed text-faint-foreground">
+                    {format === "pdf"
+                      ? "This preview matches the clean template your PDF upload is re-laid out into on export."
+                      : format === "tex"
+                        ? "A reading preview. On export, changes are spliced into your original LaTeX source, so the downloaded PDF keeps your own formatting."
+                        : "A reading preview. On export, changes are written back into your original Word file, so the downloaded PDF keeps your own styles."}
+                  </p>
+                  <button
+                    onClick={previewPdf}
+                    disabled={pdfLoading}
+                    className="mt-2 h-9 cursor-pointer border border-border-strong px-3 text-xs font-semibold text-foreground transition-colors duration-150 hover:bg-background disabled:cursor-default disabled:opacity-50"
+                  >
+                    {pdfLoading ? "Building exact PDF…" : "See the exact PDF"}
+                  </button>
+                  {pdfError && (
+                    <p role="alert" className="mt-2 text-xs text-danger">
+                      {pdfError}
+                    </p>
+                  )}
+                </div>
               </>
             ) : (
               <JdPanel
@@ -704,7 +797,93 @@ export default function ReviewClient({
           )}
         </div>
       </div>
+
+      {/* The real compiled PDF, shown rather than downloaded. */}
+      {pdfCurrent && pdfUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Exact PDF preview"
+          className="fixed inset-0 z-50 flex flex-col bg-black/70 p-4 sm:p-8"
+          onClick={closePdf}
+        >
+          <div
+            className="mx-auto flex h-full w-full max-w-4xl flex-col border border-border bg-surface"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b border-border px-5 py-3">
+              <div>
+                <p className="label-caps">Exact output</p>
+                <p className="text-sm text-muted-foreground">
+                  Compiled through the same pipeline as your download.
+                </p>
+              </div>
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-auto h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold leading-9 text-foreground transition-colors duration-150 hover:bg-background"
+              >
+                Open in new tab
+              </a>
+              <button
+                onClick={closePdf}
+                className="h-9 cursor-pointer border border-border-strong px-4 text-sm font-semibold text-foreground transition-colors duration-150 hover:bg-background"
+              >
+                Close
+              </button>
+            </div>
+            {/* <object> degrades to its children when a browser cannot render
+                PDFs inline, so the preview never becomes a dead end. */}
+            <object
+              data={pdfUrl}
+              type="application/pdf"
+              title="Exact PDF preview"
+              className="min-h-0 flex-1 bg-[#6b6b66]"
+            >
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Your browser can’t display PDFs inline.
+                </p>
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="h-10 cursor-pointer bg-primary px-5 text-sm font-semibold leading-10 text-on-primary transition-opacity duration-150 hover:opacity-90"
+                >
+                  Open the PDF in a new tab
+                </a>
+              </div>
+            </object>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+function ViewToggle({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`cursor-pointer border px-2 py-0.5 text-[11px] font-semibold transition-colors duration-150 ${
+        active
+          ? "border-accent bg-accent-soft text-accent"
+          : "border-border-strong text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

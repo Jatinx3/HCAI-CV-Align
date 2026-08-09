@@ -89,6 +89,64 @@ body {
   color: var(--faint-foreground);
 }
 
+/* ── CV document preview ──────────────────────────────────────────────
+   Mirrors the LaTeX export template (A4, 2.2cm margins, serif, ruled
+   headings) so what the user reviews matches what they download. The sheet
+   keeps paper colours in both themes, the way a PDF viewer does — the
+   document is the artefact, not part of the app's surface. */
+.cv-mat {
+  background: #6b6b66;
+  padding: 18px;
+  overflow: auto;
+}
+.cv-paper {
+  background: #ffffff;
+  color: #14140f;
+  font-family: Georgia, "Times New Roman", serif;
+  /* 2.2cm of a 21cm page ≈ 10.5%, matching the export geometry. */
+  padding: 10.5% 10.5% 12%;
+  aspect-ratio: 210 / 297;
+  height: auto; /* a page grows with content rather than clipping it */
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.cv-name {
+  margin: 0 0 3px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.cv-contact {
+  margin: 0 0 14px;
+  font-size: 11px;
+  color: #444440;
+}
+.cv-heading {
+  margin: 15px 0 0;
+  padding-bottom: 2px;
+  border-bottom: 0.5px solid #8a8a84;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.cv-para {
+  margin: 5px 0 0;
+}
+.cv-list {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+.cv-list li {
+  margin-bottom: 1px;
+}
+.cv-mark {
+  background: #dcefe5;
+  color: inherit;
+  padding: 0 1px;
+}
+
 /* Visible keyboard focus everywhere; motion kept to color/opacity only. */
 :focus-visible {
   outline: 2px solid var(--ring);

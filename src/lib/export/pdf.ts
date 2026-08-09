@@ -1,4 +1,5 @@
 import { compileTex, escapeTexText } from "./tex";
+import { BULLET, isHeading, titleCase, unwrapLines } from "../cv-layout";
 
 /**
  * .pdf path — best effort, explicit reformat. The rewritten plain text is
@@ -12,26 +13,18 @@ import { compileTex, escapeTexText } from "./tex";
  * - lines starting with a bullet marker = itemized lists
  */
 
-const BULLET = /^\s*[•\-–*]\s+/;
-
-function isHeading(line: string): boolean {
-  const t = line.trim();
-  if (!t || t.length > 48 || BULLET.test(t)) return false;
-  const caps = t === t.toUpperCase() && /[A-Z]/.test(t);
-  const knownHeading =
-    /^(summary|profile|experience|work experience|employment|skills|education|projects|certifications|publications|awards|interests|references|languages)$/i.test(
-      t,
-    );
-  return caps || knownHeading;
-}
-
 export function renderCvTemplate(text: string): string {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const raw = text.replace(/\r\n/g, "\n").split("\n");
 
   // First non-empty line is treated as the person's name.
-  let nameIdx = lines.findIndex((l) => l.trim().length > 0);
+  let nameIdx = raw.findIndex((l) => l.trim().length > 0);
   if (nameIdx === -1) nameIdx = 0;
-  const name = escapeTexText(lines[nameIdx]?.trim() ?? "Curriculum Vitae");
+  const name = escapeTexText(raw[nameIdx]?.trim() ?? "Curriculum Vitae");
+
+  // Same unwrapping as the on-screen preview, so the download matches it —
+  // applied below the name only, mirroring layoutCv.
+  const lines = [raw[nameIdx] ?? "", ...unwrapLines(raw.slice(nameIdx + 1))];
+  nameIdx = 0;
 
   const body: string[] = [];
   let inList = false;
@@ -85,11 +78,6 @@ export function renderCvTemplate(text: string): string {
 ${body.join("\n")}
 \\end{document}
 `;
-}
-
-function titleCase(s: string): string {
-  const lower = s.toLowerCase();
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 /** Render rewritten plain text into a clean standard resume PDF. */

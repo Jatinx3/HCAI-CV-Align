@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import CvPaper from "@/components/cv-paper";
 
 type UploadResult = {
   id: string;
@@ -103,6 +104,7 @@ export default function UploadForm() {
   const [starting, setStarting] = useState(false);
   const [oneClicking, setOneClicking] = useState(false);
   const [oneClickNote, setOneClickNote] = useState<string | null>(null);
+  const [preview, setPreview] = useState<"document" | "text">("document");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function startHumanCentered() {
@@ -363,18 +365,55 @@ export default function UploadForm() {
           )}
 
           <div>
-            <p className="label-caps">Verification</p>
-            <h3 className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
-              What the assistant will work from
-            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <p className="label-caps">Verification</p>
+                <h3 className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
+                  What the assistant will work from
+                </h3>
+              </div>
+              <div className="ml-auto flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPreview("document")}
+                  aria-pressed={preview === "document"}
+                  className={`cursor-pointer border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 ${
+                    preview === "document"
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-border-strong text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Document
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreview("text")}
+                  aria-pressed={preview === "text"}
+                  className={`cursor-pointer border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 ${
+                    preview === "text"
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-border-strong text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Extracted text
+                </button>
+              </div>
+            </div>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              This is the exact text read from your file — check it looks right
-              before continuing. If something important is missing, try a
-              different format of your CV.
+              {preview === "document"
+                ? "Your CV as the assistant has understood it. Check the sections and wording look right before continuing."
+                : "The exact text read from your file. If something important is missing, try a different format of your CV."}
             </p>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap border border-border bg-background p-4 text-[13px] leading-relaxed text-foreground">
-              {result.extractedText}
-            </pre>
+            {preview === "document" ? (
+              <CvPaper
+                text={result.extractedText}
+                className="mt-3 max-h-96 border border-border"
+              />
+            ) : (
+              <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap border border-border bg-background p-4 text-[13px] leading-relaxed text-foreground">
+                {result.extractedText}
+              </pre>
+            )}
           </div>
 
           <div className="border-t border-border pt-5">
