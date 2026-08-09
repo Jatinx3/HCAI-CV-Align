@@ -23,18 +23,20 @@ export function isHeading(line: string): boolean {
 
   /**
    * Title Case section names — "Professional Experience", "Technical Skills".
-   * Common in LaTeX résumé classes, which do not set headings in capitals, so
-   * an ALL-CAPS test alone leaves them rendered as body text. Kept tight: a
-   * few capitalised words, no digits, and none of the punctuation that marks
-   * an entry line ("Capgemini | Software Engineer", "Dublin, Ireland • …").
+   * LaTeX résumé classes do not set headings in capitals, so an ALL-CAPS test
+   * alone leaves them as body text.
+   *
+   * Matched against known section vocabulary rather than "any Title Case
+   * line": a CV header carries a job title and link labels ("Software
+   * Engineer", "Portfolio") that are indistinguishable from a heading by shape
+   * alone, and promoting those splits the contact block into false sections.
    */
-  const words = t.split(/\s+/);
-  return (
-    words.length <= 4 &&
-    !/[\d|•·,:()]/.test(t) &&
-    words.every((w) => /^[A-Z][a-zA-Z-]*$/.test(w))
-  );
+  return SECTION_NAME.test(t.replace(/[:\s]+$/, ""));
 }
+
+/** Section names as résumés actually write them, with common qualifiers. */
+const SECTION_NAME =
+  /^((professional|work|relevant|other|additional|technical|core|key|personal|selected)\s+)?(summary|profile|objective|about|experience|employment|history|education|skills|competencies|expertise|projects|project|certifications?|publications?|awards?|honou?rs|interests|volunteering|languages|references|activities|training|courses|memberships?|achievements|leadership|extracurriculars?)$/i;
 
 /**
  * Résumé entries put a title on the left and a date or grade hard against the
@@ -43,8 +45,38 @@ export function isHeading(line: string): boolean {
  * back apart is what lets both the preview and the export set the row as the
  * two columns it actually is.
  */
-const RIGHT_COLUMN =
-  /(Expected|Graduated|Anticipated|Present|GPA|CGPA)\b|\d{1,2}\/\d{4}|\b(19|20)\d{2}\s*[–—-]/;
+const MONTH = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+
+const RIGHT_COLUMN = new RegExp(
+  `(Expected|Graduated|Anticipated|Present|GPA|CGPA)\\b|\\d{1,2}/\\d{4}|\\b(19|20)\\d{2}\\s*[–—-]|^(${MONTH})[a-z]*\\.?\\s*\\d{4}`,
+);
+
+/**
+ * A line that is only a date range, or only a place. Résumé macros such as
+ * \resumeSubheading{title}{dates}{organisation}{location} put each field in
+ * its own brace group, so extraction yields them as four consecutive lines
+ * where the document shows two rows.
+ */
+export function isDateOnly(line: string): boolean {
+  const t = line.trim().replace(/\s+/g, " ");
+  if (!t || t.length > 34) return false;
+  return /^((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}|\d{1,2}\/\d{4}|\d{4})\s*(–|—|--|-|to|until)\s*((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}|\d{1,2}\/\d{4}|\d{4}|Present|Current|Now)$/i.test(
+    t,
+  );
+}
+
+/** A short line with no sentence punctuation — an organisation or a place. */
+export function isShortField(line: string): boolean {
+  const t = line.trim();
+  return (
+    t.length > 0 &&
+    t.length <= 48 &&
+    !BULLET.test(t) &&
+    !isHeading(t) &&
+    !/[.!?;:]$/.test(t) &&
+    !isDateOnly(t)
+  );
+}
 
 export function splitEntry(line: string): { left: string; right: string } | null {
   const t = line.trim();
@@ -52,9 +84,9 @@ export function splitEntry(line: string): { left: string; right: string } | null
 
   // The boundary is a lowercase letter or closing punctuation immediately
   // followed by the start of the right-hand column.
-  const m = /([a-z)\].,])(?=(Expected|Graduated|Anticipated|Present|GPA|CGPA|\d{1,2}\/\d{4}))/.exec(
-    t,
-  );
+  const m = new RegExp(
+    `([a-z)\\].,])(?=(Expected|Graduated|Anticipated|Present|GPA|CGPA|\\d{1,2}/\\d{4}|(${MONTH})[a-z]*\\.?\\s*\\d{4}))`,
+  ).exec(t);
   if (!m) return null;
 
   const at = m.index + 1;
@@ -62,6 +94,25 @@ export function splitEntry(line: string): { left: string; right: string } | null
   const right = t.slice(at).trim();
   if (!left || !right || !RIGHT_COLUMN.test(right)) return null;
   return { left, right };
+}
+
+/**
+ * Split a trailing proper noun that extraction glued on: "Airtel International
+ * LLPIndia" is an organisation and a location. There is nothing in the string
+ * itself that proves where the boundary is, so this is only ever applied to
+ * the line directly beneath an entry — the position a résumé reserves for
+ * exactly that pair.
+ */
+export function splitTrailingProper(
+  line: string,
+): { left: string; right: string } | null {
+  const t = line.trim();
+  if (!t || BULLET.test(t) || isHeading(t) || t.length > 64) return null;
+
+  const m = /(?<=[A-Za-z])(?=[A-Z][a-z]{2,}$)/.exec(t);
+  if (!m || m.index < 2) return null;
+
+  return { left: t.slice(0, m.index).trim(), right: t.slice(m.index).trim() };
 }
 
 export function titleCase(s: string): string {
@@ -110,8 +161,15 @@ export function unwrapLines(lines: string[]): string[] {
       !splitEntry(prev) &&
       // previous line did not finish a sentence…
       !/[.!?:;]$/.test(prev) &&
-      // …and this one does not begin a new entry
-      /^[a-z(]/.test(line);
+      // …and this one does not begin a new entry. A line may still start with
+      // a capital and be a continuation when it closes a bracket the previous
+      // line opened: "…MSc in Computer Science (Human-Centered" / "AI), …".
+      (/^[a-z(]/.test(line) ||
+        (/\([^)]*$/.test(prev) && /^[^(]*\)/.test(line)) ||
+        // Inside a bullet, a following unmarked line is a wrap, whatever its
+        // case: a new item would carry its own marker. This is what rescues
+        // "…daily using Apache" / "Hadoop and Apache Spark".
+        (BULLET.test(prev) && !isDateOnly(line) && !isShortField(line)));
 
     if (continues) out[out.length - 1] = `${prev} ${line}`;
     else out.push(line);
@@ -165,7 +223,8 @@ export function layoutCv(text: string): CvDoc {
   for (let i = nameIdx + 1; i < lines.length; i++) {
     const t = lines[i].trim();
     if (!t) {
-      closeList();
+      // A blank line does not end a list: extraction puts one between items
+      // often enough that closing here shatters a list into single-item lists.
       continue;
     }
     if (isHeading(t)) {
@@ -181,6 +240,27 @@ export function layoutCv(text: string): CvDoc {
     }
     closeList();
 
+    // A title whose date sits on the following line, because the source macro
+    // held them in separate brace groups. Rejoining them restores the row the
+    // document actually shows, and the organisation/location pair beneath it.
+    const next = lines[i + 1]?.trim() ?? "";
+    if (seenHeading && next && isDateOnly(next) && isShortField(t)) {
+      blocks.push({ kind: "entry", left: t, right: next, secondary: false });
+      i += 1;
+      const org = lines[i + 1]?.trim() ?? "";
+      const place = lines[i + 2]?.trim() ?? "";
+      if (org && place && isShortField(org) && isShortField(place)) {
+        blocks.push({
+          kind: "entry",
+          left: org,
+          right: place,
+          secondary: true,
+        });
+        i += 2;
+      }
+      continue;
+    }
+
     const entry = splitEntry(t);
     if (entry && seenHeading) {
       // Two entry rows in a row means the second describes the first — the
@@ -195,8 +275,28 @@ export function layoutCv(text: string): CvDoc {
       continue;
     }
     // Lines above the first heading read as contact details, not body copy.
-    if (!seenHeading) contact.push(t);
-    else blocks.push({ kind: "paragraph", text: t });
+    if (!seenHeading) {
+      contact.push(t);
+      continue;
+    }
+
+    // Directly beneath an entry, a glued organisation/location pair is the
+    // sub-line of that entry.
+    const last = blocks[blocks.length - 1];
+    if (last?.kind === "entry" && !last.secondary) {
+      const pair = splitTrailingProper(t);
+      if (pair) {
+        blocks.push({
+          kind: "entry",
+          left: pair.left,
+          right: pair.right,
+          secondary: true,
+        });
+        continue;
+      }
+    }
+
+    blocks.push({ kind: "paragraph", text: t });
   }
   closeList();
 

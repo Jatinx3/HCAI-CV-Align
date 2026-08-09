@@ -47,27 +47,85 @@ export async function extractText(
   }
 }
 
-// Rough plain-text view of a .tex source for analysis/preview.
-// The export pipeline (Phase 4) works on the untouched original source.
+/**
+ * Rough plain-text view of a .tex source for analysis and preview. The export
+ * pipeline works on the untouched original source; this is only what the model
+ * and the preview read.
+ *
+ * Two rules matter. Only the document body is considered — a preamble is full
+ * of lengths and font declarations whose arguments are not prose, and reading
+ * them yields "-3.0pt" and "ffi" where a CV should be. And a command's braced
+ * argument is kept rather than dropped: résumé templates carry their content
+ * inside custom macros (\resumeItem{…}, \resumeSubheading{…}{…}), so discarding
+ * brace groups discards the CV itself.
+ */
 function stripTex(src: string): string {
-  return src
-    .replace(/(?<!\\)%.*$/gm, "") // comments
-    .replace(/\\begin\{[^}]*\}|\\end\{[^}]*\}/g, "\n")
-    .replace(/\\(section|subsection|subsubsection)\*?\{([^}]*)\}/g, "\n$2\n")
-    .replace(/\\(textbf|textit|emph|underline|texttt|mbox)\{([^}]*)\}/g, "$2")
-    .replace(/\\href\{[^}]*\}\{([^}]*)\}/g, "$1")
-    .replace(/\\item/g, "\n• ")
-    .replace(/\\\\(\[[^\]]*\])?/g, "\n")
-    .replace(/\\[a-zA-Z]+\*?(\[[^\]]*\])?(\{[^{}]*\})?/g, " ") // other commands
-    .replace(/[{}]/g, "")
-    .replace(/\$[^$]*\$/g, "");
+  let s = src.replace(/\r\n/g, "\n");
+
+  // Body only. Without \begin{document} (a fragment, or an \input file) the
+  // whole source is used, which is the best available guess.
+  const begin = s.indexOf("\\begin{document}");
+  if (begin !== -1) s = s.slice(begin + "\\begin{document}".length);
+  const end = s.indexOf("\\end{document}");
+  if (end !== -1) s = s.slice(0, end);
+
+  return (
+    s
+      .replace(/(?<!\\)%.*$/gm, "") // comments
+      // Links: keep the label, drop the target.
+      .replace(/\\href\{[^}]*\}\s*\{/g, "{")
+      .replace(/\\url\{([^}]*)\}/g, "$1")
+      // Spacing and box commands take lengths, not prose. Their arguments must
+      // go with them, or "\vspace{1pt}" contributes "1pt" to the CV.
+      .replace(
+        /\\(vspace|hspace|vskip|hskip|smallskip|medskip|bigskip|setlength|addtolength|rule|raisebox|scalebox|resizebox|includegraphics|label|pagestyle|thispagestyle|hfill|vfill|phantom|hphantom|vphantom)\*?(\s*\[[^\]]*\])?(\s*\{[^{}]*\})*/g,
+        " ",
+      )
+      // Bullets, including the wrapper macros résumé templates define for them
+      // (\resumeItem, \cvitem). The negative lookahead keeps list *scaffolding*
+      // such as \resumeItemListStart out of the bullet rule; the generic
+      // command pass below removes those.
+      .replace(/\\[a-zA-Z]*[Ii]tem(?![a-zA-Z])\s*/g, "\n• ")
+      .replace(/\\\\(\s*\[[^\]]*\])?/g, "\n") // explicit line breaks
+      .replace(/\\(begin|end)\{[^}]*\}(\[[^\]]*\])?/g, "\n") // environments
+      // Adjacent brace groups are separate fields of a résumé macro
+      // (title / date / organisation), not one run of text. A group ending in
+      // a colon is the exception — "\textbf{Databases:}{ MongoDB, …}" is one
+      // label-and-value line, and splitting it strands every label.
+      .replace(/([^:])\}\s*\{/g, "$1}\n{")
+      // Command names and their optional arguments; braced content stays.
+      .replace(/\\[a-zA-Z@]+\*?(\s*\[[^\]]*\])?/g, " ")
+      .replace(/\\[^a-zA-Z]/g, " ") // escaped punctuation: \& \% \_ \#
+      .replace(/\$[^$]*\$/g, " ") // inline math
+      .replace(/[{}]/g, " ")
+      .replace(/[&~]/g, " ") // tabular separators, ties
+      .replace(/^[ \t]*[|•]\s*$/gm, "") // rules and orphaned bullets
+  );
 }
 
 function normalize(text: string): string {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/ ?\n ?/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    text
+      .replace(/\r\n/g, "\n")
+      // Icon fonts (fontawesome and friends) have no Unicode meaning, so they
+      // extract as control characters or private-use glyphs. Left in, they
+      // become lines like "#" or "ï" sitting above the contact details.
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uE000-\uF8FF\uFFFD]/g, "")
+      // LaTeX en/em dashes survive extraction as ASCII runs.
+      .replace(/(\S)\s*---\s*(\S)/g, "$1—$2")
+      .replace(/(\S)\s*--\s*(\S)/g, "$1–$2")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      // A bullet glyph extracted onto its own line belongs to the text that
+      // follows it; left alone it is discarded as stray punctuation and the
+      // list becomes a run of paragraphs.
+      .replace(/^([\u2022\u25AA\u25CF\u25E6])[ \t]*\n+/gmu, "$1 ")
+      // A line left holding nothing but stray punctuation was an icon.
+      .replace(/^[^\p{L}\p{N}]{1,2}$/gmu, "")
+      // An icon that mapped onto a printable accented letter survives as a
+      // lone glyph in front of the detail it labelled ("ï linkedin.com/…").
+      .replace(/^(?![\u2022\u25AA\u25CF\u25E6\u2013\u2014])[^\x00-\x7F]\s+(?=\S)/gmu, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
