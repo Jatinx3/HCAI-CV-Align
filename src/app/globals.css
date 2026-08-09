@@ -133,6 +133,31 @@ body {
 .cv-para {
   margin: 5px 0 0;
 }
+/* Title on the left, date or grade hard against the right margin — the row
+   résumé layouts set with \hfill, restored after text extraction flattened it. */
+.cv-entry {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 5px 0 0;
+}
+.cv-entry-left {
+  font-weight: 700;
+  flex: 1;
+}
+.cv-entry-right {
+  flex: none;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cv-entry-sub .cv-entry-left,
+.cv-entry-sub .cv-entry-right {
+  font-weight: 400;
+  font-style: italic;
+}
+.cv-entry-sub {
+  margin-top: 1px;
+}
 .cv-list {
   margin: 4px 0 0;
   padding-left: 1.2em;

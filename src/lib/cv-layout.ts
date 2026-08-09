@@ -19,12 +19,64 @@ export function isHeading(line: string): boolean {
     /^(summary|profile|experience|work experience|employment|skills|education|projects|certifications|publications|awards|interests|references|languages)$/i.test(
       t,
     );
-  return caps || knownHeading;
+  if (caps || knownHeading) return true;
+
+  /**
+   * Title Case section names — "Professional Experience", "Technical Skills".
+   * Common in LaTeX résumé classes, which do not set headings in capitals, so
+   * an ALL-CAPS test alone leaves them rendered as body text. Kept tight: a
+   * few capitalised words, no digits, and none of the punctuation that marks
+   * an entry line ("Capgemini | Software Engineer", "Dublin, Ireland • …").
+   */
+  const words = t.split(/\s+/);
+  return (
+    words.length <= 4 &&
+    !/[\d|•·,:()]/.test(t) &&
+    words.every((w) => /^[A-Z][a-zA-Z-]*$/.test(w))
+  );
+}
+
+/**
+ * Résumé entries put a title on the left and a date or grade hard against the
+ * right margin. Text extraction drops the whitespace between the two columns,
+ * gluing them into "…Artificial IntelligenceExpected 09/2026". Splitting them
+ * back apart is what lets both the preview and the export set the row as the
+ * two columns it actually is.
+ */
+const RIGHT_COLUMN =
+  /(Expected|Graduated|Anticipated|Present|GPA|CGPA)\b|\d{1,2}\/\d{4}|\b(19|20)\d{2}\s*[–—-]/;
+
+export function splitEntry(line: string): { left: string; right: string } | null {
+  const t = line.trim();
+  if (!t || BULLET.test(t) || isHeading(t)) return null;
+
+  // The boundary is a lowercase letter or closing punctuation immediately
+  // followed by the start of the right-hand column.
+  const m = /([a-z)\].,])(?=(Expected|Graduated|Anticipated|Present|GPA|CGPA|\d{1,2}\/\d{4}))/.exec(
+    t,
+  );
+  if (!m) return null;
+
+  const at = m.index + 1;
+  const left = t.slice(0, at).trim();
+  const right = t.slice(at).trim();
+  if (!left || !right || !RIGHT_COLUMN.test(right)) return null;
+  return { left, right };
 }
 
 export function titleCase(s: string): string {
   const lower = s.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+/**
+ * ALL-CAPS headings read as shouting once set in a document face, so they are
+ * folded to sentence case. Headings that already carry their own casing —
+ * "Professional Experience" — are left exactly as the author wrote them.
+ */
+export function normaliseHeading(t: string): string {
+  const isAllCaps = t === t.toUpperCase() && /[A-Z]/.test(t);
+  return isAllCaps ? titleCase(t) : t;
 }
 
 /**
@@ -50,8 +102,12 @@ export function unwrapLines(lines: string[]): string[] {
       line.length > 0 &&
       !isHeading(line) &&
       !isHeading(prev) &&
+      // a continuation is never itself a bullet, though it may continue one:
+      // long bullets wrap, and "…serving 20K+ daily" / "operations" is one
+      // sentence split across two extracted lines
       !BULLET.test(line) &&
-      !BULLET.test(prev) &&
+      !splitEntry(line) &&
+      !splitEntry(prev) &&
       // previous line did not finish a sentence…
       !/[.!?:;]$/.test(prev) &&
       // …and this one does not begin a new entry
@@ -66,7 +122,10 @@ export function unwrapLines(lines: string[]): string[] {
 export type CvBlock =
   | { kind: "heading"; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "list"; items: string[] };
+  | { kind: "list"; items: string[] }
+  /** A title/date row. `secondary` marks the sub-line of an entry (the
+      institution under a degree), which résumé layouts set in italic. */
+  | { kind: "entry"; left: string; right: string; secondary: boolean };
 
 export type CvDoc = {
   /** First non-empty line, treated as the person's name. */
@@ -112,7 +171,7 @@ export function layoutCv(text: string): CvDoc {
     if (isHeading(t)) {
       closeList();
       seenHeading = true;
-      blocks.push({ kind: "heading", text: titleCase(t) });
+      blocks.push({ kind: "heading", text: normaliseHeading(t) });
       continue;
     }
     if (BULLET.test(t)) {
@@ -121,6 +180,20 @@ export function layoutCv(text: string): CvDoc {
       continue;
     }
     closeList();
+
+    const entry = splitEntry(t);
+    if (entry && seenHeading) {
+      // Two entry rows in a row means the second describes the first — the
+      // institution under a degree — which résumé layouts set as a sub-line.
+      const prev = blocks[blocks.length - 1];
+      blocks.push({
+        kind: "entry",
+        left: entry.left,
+        right: entry.right,
+        secondary: prev?.kind === "entry" && !prev.secondary,
+      });
+      continue;
+    }
     // Lines above the first heading read as contact details, not body copy.
     if (!seenHeading) contact.push(t);
     else blocks.push({ kind: "paragraph", text: t });

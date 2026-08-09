@@ -43,6 +43,19 @@ export default function CvPaper({
               </h2>
             );
           }
+          if (block.kind === "entry") {
+            return (
+              <div
+                key={i}
+                className={`cv-entry ${block.secondary ? "cv-entry-sub" : ""}`}
+              >
+                <span className="cv-entry-left">
+                  <Marked text={block.left} highlights={highlights} />
+                </span>
+                <span className="cv-entry-right">{block.right}</span>
+              </div>
+            );
+          }
           if (block.kind === "list") {
             return (
               <ul key={i} className="cv-list">

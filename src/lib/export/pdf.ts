@@ -1,5 +1,11 @@
 import { compileTex, escapeTexText } from "./tex";
-import { BULLET, isHeading, titleCase, unwrapLines } from "../cv-layout";
+import {
+  BULLET,
+  isHeading,
+  normaliseHeading,
+  splitEntry,
+  unwrapLines,
+} from "../cv-layout";
 
 /**
  * .pdf path — best effort, explicit reformat. The rewritten plain text is
@@ -28,6 +34,7 @@ export function renderCvTemplate(text: string): string {
 
   const body: string[] = [];
   let inList = false;
+  let lastWasEntry = false;
   const closeList = () => {
     if (inList) {
       body.push("\\end{itemize}");
@@ -45,7 +52,8 @@ export function renderCvTemplate(text: string): string {
     }
     if (isHeading(t)) {
       closeList();
-      body.push(`\\cvsection{${escapeTexText(titleCase(t))}}`);
+      body.push(`\\cvsection{${escapeTexText(normaliseHeading(t))}}`);
+      lastWasEntry = false;
       continue;
     }
     if (BULLET.test(t)) {
@@ -54,9 +62,28 @@ export function renderCvTemplate(text: string): string {
         inList = true;
       }
       body.push(`\\item ${escapeTexText(t.replace(BULLET, ""))}`);
+      // Bullets end an entry pair: the next title is a new role, not the
+      // sub-line of the previous one.
+      lastWasEntry = false;
       continue;
     }
     closeList();
+
+    // Restore the two-column entry row that text extraction flattened.
+    const entry = splitEntry(t);
+    if (entry) {
+      const left = escapeTexText(entry.left);
+      const right = escapeTexText(entry.right);
+      body.push(
+        lastWasEntry
+          ? `\\textit{${left}}\\hfill\\textit{${right}}\\par`
+          : `\\textbf{${left}}\\hfill\\textbf{${right}}\\par`,
+      );
+      lastWasEntry = !lastWasEntry;
+      continue;
+    }
+
+    lastWasEntry = false;
     body.push(`${escapeTexText(t)}\\par`);
   }
   closeList();
