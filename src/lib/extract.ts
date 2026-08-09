@@ -35,7 +35,7 @@ export async function extractText(
 ): Promise<string> {
   switch (format) {
     case "pdf": {
-      const result = await pdfParse(data);
+      const result = await pdfParse(data, { pagerender: renderPageWithColumns });
       return normalize(result.text);
     }
     case "docx": {
@@ -45,6 +45,66 @@ export async function extractText(
     case "tex":
       return normalize(stripTex(data.toString("utf-8")));
   }
+}
+
+/**
+ * Read a PDF page as positioned text rather than as a stream of words.
+ *
+ * A résumé is a two-column layout: a role on the left, its dates hard against
+ * the right margin. Default extraction returns the reading order and drops the
+ * whitespace between the columns, so "Senior Software Engineer" and "Sept 2021
+ * – July 2024" arrive glued into one string, and no amount of pattern matching
+ * on the result can reliably say where one ends and the other begins.
+ *
+ * The page itself knows: every text item carries its x position and width. A
+ * gap far wider than the spaces inside a line is a column boundary, and is
+ * emitted as a tab for the layout to split on.
+ */
+type PdfTextItem = { str: string; width?: number; transform: number[] };
+
+function renderPageWithColumns(pageData: {
+  getTextContent: (opts: object) => Promise<{ items: PdfTextItem[] }>;
+}): Promise<string> {
+  return pageData
+    .getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false })
+    .then((content) => {
+      // Group items into lines by their vertical position.
+      const rows = new Map<number, { x: number; w: number; str: string }[]>();
+      for (const item of content.items) {
+        if (!item.str) continue;
+        const y = Math.round(item.transform[5]);
+        const row = rows.get(y) ?? [];
+        row.push({ x: item.transform[4], w: item.width ?? 0, str: item.str });
+        rows.set(y, row);
+      }
+
+      const lines: string[] = [];
+      for (const y of [...rows.keys()].sort((a, b) => b - a)) {
+        const items = rows.get(y)!.sort((a, b) => a.x - b.x);
+
+        // A column gap is judged against this line's own typography, so the
+        // threshold holds for a heading and for small print alike.
+        const widths = items.filter((i) => i.str.trim()).map((i) => i.w / Math.max(i.str.length, 1));
+        const charWidth =
+          widths.length > 0 ? widths.reduce((a, b) => a + b, 0) / widths.length : 5;
+        const columnGap = Math.max(8, charWidth * 4);
+
+        let line = "";
+        let prevEnd: number | null = null;
+        for (const it of items) {
+          if (prevEnd !== null) {
+            const gap = it.x - prevEnd;
+            if (gap >= columnGap) line += "\t";
+            else if (gap > charWidth * 0.3 && !/\s$/.test(line) && !/^\s/.test(it.str))
+              line += " ";
+          }
+          line += it.str;
+          prevEnd = it.x + it.w;
+        }
+        lines.push(line);
+      }
+      return lines.join("\n");
+    });
 }
 
 /**
@@ -114,14 +174,17 @@ function normalize(text: string): string {
       // LaTeX en/em dashes survive extraction as ASCII runs.
       .replace(/(\S)\s*---\s*(\S)/g, "$1—$2")
       .replace(/(\S)\s*--\s*(\S)/g, "$1–$2")
-      .replace(/[ \t]+/g, " ")
+      // Tabs mark column boundaries the page geometry revealed; only runs of
+      // spaces are collapsed, and a tab absorbs any spaces around it.
+      .replace(/ +/g, " ")
+      .replace(/ *\t+ */g, "\t")
       .replace(/ ?\n ?/g, "\n")
       // A bullet glyph extracted onto its own line belongs to the text that
       // follows it; left alone it is discarded as stray punctuation and the
       // list becomes a run of paragraphs.
       .replace(/^([\u2022\u25AA\u25CF\u25E6])[ \t]*\n+/gmu, "$1 ")
       // A line left holding nothing but stray punctuation was an icon.
-      .replace(/^[^\p{L}\p{N}]{1,2}$/gmu, "")
+      .replace(/^[^\p{L}\p{N}]{1,6}$/gmu, "")
       // An icon that mapped onto a printable accented letter survives as a
       // lone glyph in front of the detail it labelled ("ï linkedin.com/…").
       .replace(/^(?![\u2022\u25AA\u25CF\u25E6\u2013\u2014])[^\x00-\x7F]\s+(?=\S)/gmu, "")

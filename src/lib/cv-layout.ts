@@ -79,6 +79,17 @@ export function isShortField(line: string): boolean {
 }
 
 export function splitEntry(line: string): { left: string; right: string } | null {
+  // A tab is a column boundary the page geometry proved, so it outranks every
+  // guess below it. Some templates mark the organisation row with a bullet;
+  // the row is still a title/place pair, not a list item.
+  if (line.includes("\t")) {
+    const [first, ...rest] = line.split("\t");
+    const left = first.replace(BULLET, "").trim();
+    const right = rest.join(" ").trim();
+    if (left && right) return { left, right };
+    return null;
+  }
+
   const t = line.trim();
   if (!t || BULLET.test(t) || isHeading(t)) return null;
 
@@ -169,7 +180,10 @@ export function unwrapLines(lines: string[]): string[] {
         // Inside a bullet, a following unmarked line is a wrap, whatever its
         // case: a new item would carry its own marker. This is what rescues
         // "…daily using Apache" / "Hadoop and Apache Spark".
-        (BULLET.test(prev) && !isDateOnly(line) && !isShortField(line)));
+        (BULLET.test(prev) &&
+          !isDateOnly(line) &&
+          !line.includes("\t") &&
+          !splitEntry(line)));
 
     if (continues) out[out.length - 1] = `${prev} ${line}`;
     else out.push(line);
@@ -214,7 +228,8 @@ export function splitContactRun(line: string): string[] {
     // Before an email address.
     // The separator is excluded from the class, or the lookahead matches
     // across an already-split boundary and cuts the detail before it.
-    .replace(/\s+(?=[^\s@\u0000]+@[^\s@\u0000]+\.[a-z]{2,})/gi, SEP)
+    // Not after a label — "Email: someone@example.com" is one detail.
+    .replace(/(?<!:)\s+(?=[^\s@\u0000]+@[^\s@\u0000]+\.[a-z]{2,})/gi, SEP)
     // Before a URL or a bare domain.
     .replace(
       /\s+(?=(https?:\/\/|www\.)|[a-z0-9-]+\.(com|org|net|io|dev|me|co|ie|uk)\b)/gi,
@@ -222,9 +237,13 @@ export function splitContactRun(line: string): string[] {
     )
     .split(SEP)
     .map((s) => s.trim())
-    .filter(Boolean);
+    // A leftover icon glyph carries no letters or digits, or stands alone as a
+    // single character; neither is a contact detail.
+    .filter((s) => s.length > 1 && /[\p{L}\p{N}]/u.test(s));
 
-  return parts.length > 0 ? parts : [t];
+  // Deliberately no fallback to the raw line: when everything was filtered the
+  // line held only icons, and returning it would put them back.
+  return parts;
 }
 
 /** A short line with no contact punctuation — a professional title. */
@@ -249,7 +268,13 @@ export function layoutCv(text: string): CvDoc {
 
   let nameIdx = raw.findIndex((l) => l.trim().length > 0);
   if (nameIdx === -1) nameIdx = 0;
-  const name = raw[nameIdx]?.trim() ?? "Curriculum Vitae";
+
+  // Some headers set the name on the left and a contact detail hard right, on
+  // the same line. Only the left column is the name.
+  const nameLine = raw[nameIdx]?.trim() ?? "Curriculum Vitae";
+  const [namePart, ...nameRest] = nameLine.split("\t");
+  const name = namePart.trim() || "Curriculum Vitae";
+  const headerRight = nameRest.join(" ").trim();
 
   // Unwrap only below the name, so a lowercase contact line is never absorbed
   // into it. Index 0 of `lines` corresponds to the name itself.
@@ -258,6 +283,7 @@ export function layoutCv(text: string): CvDoc {
 
   const blocks: CvBlock[] = [];
   const contact: string[] = [];
+  if (headerRight) contact.push(headerRight);
   let seenHeading = false;
   let list: string[] | null = null;
 
@@ -279,7 +305,8 @@ export function layoutCv(text: string): CvDoc {
       blocks.push({ kind: "heading", text: normaliseHeading(t) });
       continue;
     }
-    if (BULLET.test(t)) {
+    // A bullet that carries a column boundary is an entry row, not a list item.
+    if (BULLET.test(t) && !t.includes("\t")) {
       if (!list) list = [];
       list.push(t.replace(BULLET, ""));
       continue;
@@ -362,7 +389,12 @@ export function layoutCv(text: string): CvDoc {
   return {
     name,
     subtitle,
-    contact: contact.flatMap(splitContactRun),
+    // A contact line may itself be a two-column row ("ijatin.dev \t Mobile: …").
+    contact: contact
+      .flatMap((c) => c.split("\t"))
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .flatMap(splitContactRun),
     blocks,
   };
 }
