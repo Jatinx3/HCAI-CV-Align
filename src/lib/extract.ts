@@ -62,25 +62,34 @@ export async function extractText(
  */
 type PdfTextItem = { str: string; width?: number; transform: number[] };
 
+/** Vertical slack, in PDF units, within which items count as one line. */
+const LINE_TOLERANCE = 2.5;
+
 function renderPageWithColumns(pageData: {
   getTextContent: (opts: object) => Promise<{ items: PdfTextItem[] }>;
 }): Promise<string> {
   return pageData
     .getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false })
     .then((content) => {
-      // Group items into lines by their vertical position.
-      const rows = new Map<number, { x: number; w: number; str: string }[]>();
+      // Group items into lines by vertical position, with a tolerance. Items
+      // on one visual line are rarely at an identical y — a superscript, a
+      // different font, or plain rounding puts them a fraction apart — and
+      // grouping on the exact value splits a heading into "Pro" and
+      // "fessional Summary" on separate lines.
+      type Piece = { x: number; w: number; str: string };
+      const placed: { y: number; items: Piece[] }[] = [];
       for (const item of content.items) {
         if (!item.str) continue;
-        const y = Math.round(item.transform[5]);
-        const row = rows.get(y) ?? [];
-        row.push({ x: item.transform[4], w: item.width ?? 0, str: item.str });
-        rows.set(y, row);
+        const y = item.transform[5];
+        const piece = { x: item.transform[4], w: item.width ?? 0, str: item.str };
+        const row = placed.find((r) => Math.abs(r.y - y) <= LINE_TOLERANCE);
+        if (row) row.items.push(piece);
+        else placed.push({ y, items: [piece] });
       }
 
       const lines: string[] = [];
-      for (const y of [...rows.keys()].sort((a, b) => b - a)) {
-        const items = rows.get(y)!.sort((a, b) => a.x - b.x);
+      for (const row of placed.sort((a, b) => b.y - a.y)) {
+        const items = row.items.sort((a, b) => a.x - b.x);
 
         // A column gap is judged against this line's own typography, so the
         // threshold holds for a heading and for small print alike.

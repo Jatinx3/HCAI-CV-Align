@@ -78,6 +78,21 @@ export function isShortField(line: string): boolean {
   );
 }
 
+/**
+ * A short right-hand column that is not a date: a location, a grade, an award.
+ * Only ever consulted when a separator has already marked the boundary.
+ */
+function isPlaceLike(s: string): boolean {
+  const t = s.trim();
+  return (
+    t.length > 1 &&
+    t.length <= 40 &&
+    !/[.!?;]$/.test(t) &&
+    /^[A-Z]/.test(t) &&
+    t.split(/\s+/).length <= 5
+  );
+}
+
 export function splitEntry(line: string): { left: string; right: string } | null {
   // A tab is a column boundary the page geometry proved, so it outranks every
   // guess below it. Some templates mark the organisation row with a bullet;
@@ -92,6 +107,16 @@ export function splitEntry(line: string): { left: string; right: string } | null
 
   const t = line.trim();
   if (!t || BULLET.test(t) || isHeading(t)) return null;
+
+  // Plain templates put no gap between the columns at all; they write a
+  // separator. Split there when what follows reads as a right-hand column.
+  const piped = /^(.+?)\s+[|•·–—]\s+(.+)$/.exec(t);
+  if (piped) {
+    const [, left, right] = piped;
+    if (RIGHT_COLUMN.test(right) || isDateOnly(right) || isPlaceLike(right)) {
+      return { left: left.trim(), right: right.trim() };
+    }
+  }
 
   // The boundary is a lowercase letter or closing punctuation immediately
   // followed by the start of the right-hand column.
