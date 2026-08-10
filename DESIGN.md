@@ -69,7 +69,9 @@ replacement inside arbitrary PDFs.
   Some reflow expected when text length changes.
 - **.pdf (best effort, explicit reformat):** extract text, rewrite, render into a clean
   standard resume template exported as PDF. Tell the user a PDF upload is reformatted,
-  not cloned.
+  not cloned. Column structure is recovered from glyph positions (pdf.js item x/width),
+  not guessed from the flattened string.
+  In-place editing was investigated and rejected on evidence — see below.
 
 ## Tech stack (decided)
 
@@ -108,7 +110,13 @@ No names, emails, or identifying content beyond the uploaded CV.
 
 - Bias detection, demographic inference, fairness scoring.
 - Audit trails or compliance tooling framed as accountability features.
-- In-place text replacement inside arbitrary PDFs.
+- In-place text replacement inside arbitrary PDFs. Attempted behind
+  `PDF_INPLACE_EDIT=true` (`src/lib/export/pdf-inplace.ts`) and left disabled: without
+  rewriting the page content stream, an edit can only paint over the original run, and
+  painting over does not delete. Both the old and the new wording stay in the text layer,
+  so an ATS would read a contradictory CV that looks correct on screen. Verified across
+  the generated corpus (`npm run corpus`); every template fell back. Doing this properly
+  requires true redaction at the content-stream level.
 - Anything that fabricates or embellishes CV content in human-centered mode.
 
 ## Build phases

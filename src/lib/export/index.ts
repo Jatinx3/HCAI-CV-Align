@@ -7,6 +7,7 @@ import {
 } from "./tex";
 import { applyDocxReplacements, docxToPdf } from "./docx";
 import { renderCleanPdf } from "./pdf";
+import { editPdfInPlace, verifyInPlace } from "./pdf-inplace";
 
 export type { SpanReplacement };
 
@@ -16,8 +17,10 @@ export type ExportResult = {
       structure (tex/docx paths). Surfaced to the user, never silent. */
   unplaced: SpanReplacement[];
   /** True when the output is a re-laid-out clean template rather than the
-      original design (always true for pdf uploads). */
+      original design. */
   reformatted: boolean;
+  /** Why a PDF fell back to the clean template, when it did. */
+  reformatReason?: string;
 };
 
 /**
@@ -55,8 +58,58 @@ export async function exportCv(opts: {
       return { pdf, unplaced: spliced.unplaced, reformatted: false };
     }
     case "pdf": {
-      const pdf = await renderCleanPdf(opts.fullText);
-      return { pdf, unplaced: [], reformatted: true };
+      /**
+       * Try to keep the user's own design by editing the accepted changes into
+       * the uploaded file, and verify the result before returning it. In-place
+       * editing of an arbitrary PDF cannot be made reliable — subsetted fonts,
+       * no reflow — and its failures are silent, so a clean reformat is kept as
+       * the guaranteed path underneath. The caller is told which one it got.
+       */
+      if (process.env.PDF_INPLACE_EDIT !== "true") {
+        return {
+          pdf: await renderCleanPdf(opts.fullText),
+          unplaced: [],
+          reformatted: true,
+          reformatReason: "in-place PDF editing is disabled",
+        };
+      }
+
+      try {
+        const edit = await editPdfInPlace(opts.originalData, opts.replacements);
+        if (edit.ok) {
+          const check = await verifyInPlace(
+            edit.pdf,
+            opts.originalData,
+            opts.replacements.filter((r) => !edit.unplaced.includes(r)),
+          );
+          if (check.ok) {
+            return {
+              pdf: edit.pdf,
+              unplaced: edit.unplaced,
+              reformatted: false,
+            };
+          }
+          return {
+            pdf: await renderCleanPdf(opts.fullText),
+            unplaced: [],
+            reformatted: true,
+            reformatReason: check.reason,
+          };
+        }
+        return {
+          pdf: await renderCleanPdf(opts.fullText),
+          unplaced: [],
+          reformatted: true,
+          reformatReason: edit.reason,
+        };
+      } catch (err) {
+        return {
+          pdf: await renderCleanPdf(opts.fullText),
+          unplaced: [],
+          reformatted: true,
+          reformatReason: (err as Error).message.slice(0, 80),
+        };
+      }
     }
   }
 }
