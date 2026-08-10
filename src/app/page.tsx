@@ -56,10 +56,9 @@ export default async function Home() {
 
       <footer className="border-t border-border">
         <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
-          <p className="text-sm leading-relaxed text-faint-foreground">
+          <p className="text-sm text-faint-foreground">
             MSc research prototype. Your CV and interactions are stored for
-            study analysis only — no names or emails beyond your login, and
-            nothing is shared outside the research.
+            research only.
           </p>
         </div>
       </footer>
