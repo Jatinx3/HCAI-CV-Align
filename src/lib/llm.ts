@@ -1,5 +1,6 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { completeStub } from "./llm-stub";
 
 /**
  * Single server-side LLM client with a provider switch. Never called from the
@@ -9,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
  * switching providers is an env change only (LLM_PROVIDER).
  */
 
-export type LlmProvider = "openrouter" | "anthropic";
+export type LlmProvider = "openrouter" | "anthropic" | "stub";
 
 export type CompletionRequest = {
   system: string;
@@ -28,9 +29,9 @@ export class LlmCallError extends Error {}
 
 export function activeProvider(): LlmProvider {
   const raw = (process.env.LLM_PROVIDER ?? "openrouter").toLowerCase();
-  if (raw !== "openrouter" && raw !== "anthropic") {
+  if (raw !== "openrouter" && raw !== "anthropic" && raw !== "stub") {
     throw new LlmConfigError(
-      `LLM_PROVIDER must be "openrouter" or "anthropic" (got "${raw}").`,
+      `LLM_PROVIDER must be "openrouter", "anthropic", or "stub" (got "${raw}").`,
     );
   }
   return raw;
@@ -38,14 +39,18 @@ export function activeProvider(): LlmProvider {
 
 /** Model id in use, for telemetry and for showing the user what produced a suggestion. */
 export function activeModel(): string {
-  return activeProvider() === "anthropic"
+  const provider = activeProvider();
+  if (provider === "stub") return "stub (offline)";
+  return provider === "anthropic"
     ? (process.env.CLAUDE_MODEL ?? "claude-opus-4-8")
     : (process.env.OPENROUTER_MODEL ??
         "meta-llama/llama-3.3-70b-instruct:free");
 }
 
 export async function complete(req: CompletionRequest): Promise<string> {
-  return activeProvider() === "anthropic"
+  const provider = activeProvider();
+  if (provider === "stub") return completeStub(req);
+  return provider === "anthropic"
     ? completeAnthropic(req)
     : completeOpenRouter(req);
 }
