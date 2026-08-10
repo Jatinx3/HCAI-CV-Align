@@ -15,6 +15,12 @@ export type CompletionRequest = {
   system: string;
   user: string;
   maxTokens?: number;
+  /**
+   * How long to wait for the model. One-click sends a whole CV in a single
+   * request and legitimately takes longer than the per-section calls the
+   * review mode makes, so the ceiling is set by the caller rather than fixed.
+   */
+  timeoutMs?: number;
 };
 
 export class LlmConfigError extends Error {}
@@ -100,6 +106,7 @@ async function completeOpenRouter({
   system,
   user,
   maxTokens = 16000,
+  timeoutMs = 180_000,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -126,9 +133,17 @@ async function completeOpenRouter({
           { role: "user", content: user },
         ],
       }),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
+  } catch (err) {
+    // A timeout and an unreachable host need different advice, and telling a
+    // participant "could not reach" when the model was simply slow sends them
+    // to check a connection that is fine.
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      throw new LlmCallError(
+        `The model did not respond within ${Math.round(timeoutMs / 1000)}s. Free-tier models are slow under load — try again in a moment.`,
+      );
+    }
     throw new LlmCallError("Could not reach OpenRouter.");
   }
 

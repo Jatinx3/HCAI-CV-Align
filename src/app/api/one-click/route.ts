@@ -65,6 +65,9 @@ export async function POST(request: Request) {
     rewritten = await complete({
       system: buildOneClickSystemPrompt(),
       user: buildOneClickUserPrompt(doc.extractedText, jdText),
+      // A whole CV in one request, against a free-tier model. The route allows
+      // 300s; leave headroom so the export still has time to run.
+      timeoutMs: 240_000,
     });
   } catch (err) {
     if (err instanceof LlmConfigError) {

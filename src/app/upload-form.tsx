@@ -99,7 +99,8 @@ export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [jdText, setJdText] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  type FormError = { title: string; detail: string; retry?: () => void };
+  const [error, setError] = useState<FormError | null>(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [oneClicking, setOneClicking] = useState(false);
@@ -123,13 +124,21 @@ export default function UploadForm() {
       });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error ?? "Could not start the review.");
+        setError({
+          title: "Couldn\u2019t start the review",
+          detail: json.error ?? "Could not start the review.",
+          retry: startHumanCentered,
+        });
         setStarting(false);
         return;
       }
       router.push(`/review/${json.id}`);
     } catch {
-      setError("Could not start the review. Check your connection.");
+      setError({
+        title: "Couldn\u2019t start the review",
+        detail: "Could not start the review. Check your connection.",
+        retry: startHumanCentered,
+      });
       setStarting(false);
     }
   }
@@ -147,7 +156,11 @@ export default function UploadForm() {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        setError(j.error ?? "One-click rewrite failed.");
+        setError({
+          title: "Couldn\u2019t rewrite your CV",
+          detail: j.error ?? "One-click rewrite failed.",
+          retry: runOneClick,
+        });
         setOneClicking(false);
         return;
       }
@@ -160,7 +173,11 @@ export default function UploadForm() {
       URL.revokeObjectURL(url);
       setOneClickNote("Rewritten CV downloaded.");
     } catch {
-      setError("One-click rewrite failed. Check your connection.");
+      setError({
+        title: "Couldn\u2019t rewrite your CV",
+        detail: "One-click rewrite failed. Check your connection.",
+        retry: runOneClick,
+      });
     } finally {
       setOneClicking(false);
     }
@@ -180,12 +197,18 @@ export default function UploadForm() {
       const res = await fetch("/api/cv", { method: "POST", body });
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error ?? "Upload failed. Please try again.");
+        setError({
+          title: "Couldn\u2019t read that file",
+          detail: json.error ?? "Upload failed. Please try again.",
+        });
       } else {
         setResult(json);
       }
     } catch {
-      setError("Upload failed. Check your connection and try again.");
+      setError({
+        title: "Couldn\u2019t read that file",
+        detail: "Upload failed. Check your connection and try again.",
+      });
     } finally {
       setUploading(false);
     }
@@ -323,10 +346,22 @@ export default function UploadForm() {
         >
           <IconAlert className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
           <div>
-            <p className="font-semibold text-danger">Couldn’t read that file</p>
+            {/* The heading follows what actually failed. A rewrite that timed
+                out is not a file that could not be read, and sending someone
+                to re-check their CV over it wastes their time. */}
+            <p className="font-semibold text-danger">{error.title}</p>
             <p className="mt-0.5 text-sm leading-relaxed text-danger">
-              {error}
+              {error.detail}
             </p>
+            {error.retry && (
+              <button
+                type="button"
+                onClick={error.retry}
+                className="mt-3 h-9 cursor-pointer border border-danger px-4 text-sm font-semibold text-danger transition-colors duration-150 hover:bg-danger/10"
+              >
+                Try again
+              </button>
+            )}
           </div>
         </div>
       )}
