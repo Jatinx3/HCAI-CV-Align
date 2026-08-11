@@ -49,7 +49,8 @@ async function checkTemplate(name: string): Promise<Result> {
   mkdirSync(OUT, { recursive: true });
   writeFileSync(join(OUT, `${name}.pdf`), pdf);
 
-  const doc = layoutCv(await extractText("pdf", pdf));
+  const extracted = await extractText("pdf", pdf);
+  const doc = layoutCv(extracted);
   const flat = key(
     [
       doc.name,
@@ -110,6 +111,36 @@ async function checkTemplate(name: string): Promise<Result> {
   for (const b of allBullets()) {
     if (!bulletText.some((x) => x === key(b))) {
       failures.push(`bullet lost or mangled: "${b.slice(0, 48)}…"`);
+    }
+  }
+
+  /**
+   * An accepted suggestion must not change the structure of the document.
+   *
+   * A bullet wrapped by the page arrives as two lines, and the second one is
+   * rejoined partly on the evidence that it starts lowercase. A suggestion
+   * that rewrites that fragment will often capitalise it — it reads as a
+   * sentence — which used to break the bullet in two and leave the second half
+   * unmarked in the export. Capitalising every continuation line simulates the
+   * worst case; the same bullets must come back.
+   */
+  const lines = extracted.split("\n");
+  const capitalised = lines
+    .map((l, i) => {
+      // A line continuing a word the typesetter hyphenated ("…200 mil-" /
+      // "liseconds.") is not something a suggestion can rewrite: the model
+      // quotes text from the CV, and "liseconds." is not a word in it.
+      const midWord = /-$/.test(lines[i - 1] ?? "");
+      return !midWord && /^[a-z]/.test(l) ? l[0].toUpperCase() + l.slice(1) : l;
+    })
+    .join("\n");
+  const afterEdit = layoutCv(capitalised)
+    .blocks.filter((b) => b.kind === "list")
+    .flatMap((b) => (b as { items: string[] }).items)
+    .map(key);
+  for (const b of allBullets()) {
+    if (!afterEdit.some((x) => x === key(b))) {
+      failures.push(`bullet split by an accepted edit: "${b.slice(0, 44)}…"`);
     }
   }
 

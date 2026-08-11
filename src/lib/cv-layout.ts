@@ -235,17 +235,6 @@ export function normaliseHeading(t: string): string {
 }
 
 /**
- * Rejoin lines that are only broken because the source document was hard
- * wrapped. Extracted PDF and LaTeX text arrives wrapped at the page width, so
- * a single sentence can span three lines; treating each as its own paragraph
- * sets the CV as a column of fragments.
- *
- * A line continues the previous one when the previous line does not end a
- * sentence and this line does not start one. That keeps genuinely separate
- * entries — a role title followed by an achievement, each ending in a full
- * stop — on their own lines.
- */
-/**
  * Word parts that are hyphenated because the author wrote them that way, not
  * because the typesetter broke the line: "human-centered", "real-time". Both
  * cases reach extraction as a trailing hyphen, and nothing in the text says
@@ -269,6 +258,17 @@ function joinWrapped(prev: string, line: string): string {
   return `${prev} ${line}`;
 }
 
+/**
+ * Rejoin lines that are only broken because the source document was hard
+ * wrapped. Extracted PDF and LaTeX text arrives wrapped at the page width, so
+ * a single sentence can span three lines; treating each as its own paragraph
+ * sets the CV as a column of fragments.
+ *
+ * A line continues the previous one when the previous line does not end a
+ * sentence and this line does not start one. That keeps genuinely separate
+ * entries — a role title followed by an achievement, each ending in a full
+ * stop — on their own lines.
+ */
 export function unwrapLines(lines: string[]): string[] {
   const out: string[] = [];
   for (const raw of lines) {
@@ -287,8 +287,20 @@ export function unwrapLines(lines: string[]): string[] {
       !BULLET.test(line) &&
       !splitEntry(line) &&
       !splitEntry(prev) &&
-      // previous line did not finish a sentence…
-      !/[.!?:;]$/.test(prev) &&
+      /**
+       * …previous line did not finish a sentence. Inside a bullet a semicolon
+       * or a colon is a clause break rather than the end of the item, so they
+       * do not count: "…cutting query latency by 60%;" / "rolled out on
+       * Hugging Face Spaces" is one bullet the page happened to break.
+       *
+       * This matters beyond extraction. Whether those two lines rejoined used
+       * to depend on the second one starting lowercase, so accepting a
+       * suggestion that capitalised the fragment — a reasonable thing for the
+       * model to do, since it reads as a sentence — split the bullet in two
+       * and left the second half unmarked in the exported PDF. An accepted
+       * edit must not be able to change the structure of the document.
+       */
+      !(BULLET.test(prev) ? /[.!?]$/ : /[.!?:;]$/).test(prev) &&
       // …and this one does not begin a new entry. A line may still start with
       // a capital and be a continuation when it closes a bracket the previous
       // line opened: "…MSc in Computer Science (Human-Centered" / "AI), …".
