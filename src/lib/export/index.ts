@@ -1,6 +1,7 @@
 import type { CvFormat } from "@/lib/extract";
 import {
   compileTex,
+  pdfPageCount,
   replaceTexSpans,
   type SpanReplacement,
   type TexSpliceResult,
@@ -65,9 +66,16 @@ export async function exportCv(opts: {
        * no reflow — and its failures are silent, so a clean reformat is kept as
        * the guaranteed path underneath. The caller is told which one it got.
        */
+      // The uploaded file sets the length the rewrite has to fit: a one-page
+      // CV that comes back two pages long reads as damage even when every word
+      // survived.
+      const originalPages = await pdfPageCount(opts.originalData).catch(
+        () => 1,
+      );
+
       if (process.env.PDF_INPLACE_EDIT !== "true") {
         return {
-          pdf: await renderCleanPdf(opts.fullText),
+          pdf: await renderCleanPdf(opts.fullText, originalPages),
           unplaced: [],
           reformatted: true,
           reformatReason: "in-place PDF editing is disabled",
@@ -90,21 +98,21 @@ export async function exportCv(opts: {
             };
           }
           return {
-            pdf: await renderCleanPdf(opts.fullText),
+            pdf: await renderCleanPdf(opts.fullText, originalPages),
             unplaced: [],
             reformatted: true,
             reformatReason: check.reason,
           };
         }
         return {
-          pdf: await renderCleanPdf(opts.fullText),
+          pdf: await renderCleanPdf(opts.fullText, originalPages),
           unplaced: [],
           reformatted: true,
           reformatReason: edit.reason,
         };
       } catch (err) {
         return {
-          pdf: await renderCleanPdf(opts.fullText),
+          pdf: await renderCleanPdf(opts.fullText, originalPages),
           unplaced: [],
           reformatted: true,
           reformatReason: (err as Error).message.slice(0, 80),

@@ -3,6 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
+// The implementation directly: pdf-parse's index.js runs debug code when
+// loaded outside a parent module context.
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -127,6 +130,12 @@ export function escapeTexText(text: string): string {
       .replace(/[   ]/g, "~")
       .replace(/[•·]/g, "\\textbullet{}")
   );
+}
+
+/** Page count of a compiled PDF, used to check that a rewrite still fits. */
+export async function pdfPageCount(pdf: Buffer): Promise<number> {
+  const parsed = await pdfParse(pdf);
+  return parsed.numpages;
 }
 
 /** Compile a .tex source with Tectonic; returns the PDF bytes. */

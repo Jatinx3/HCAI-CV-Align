@@ -103,8 +103,10 @@ body {
   background: #ffffff;
   color: #14140f;
   font-family: Georgia, "Times New Roman", serif;
-  /* 2.2cm of a 21cm page ≈ 10.5%, matching the export geometry. */
-  padding: 10.5% 10.5% 12%;
+  /* 1.4cm of a 21cm page ≈ 6.7%, matching the loosest export geometry. The
+     exporter tightens from there to keep the CV on the page count it arrived
+     with, so the preview is the roomiest the download can be, never roomier. */
+  padding: 6.7% 6.7% 8%;
   aspect-ratio: 210 / 297;
   height: auto; /* a page grows with content rather than clipping it */
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);

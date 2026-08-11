@@ -76,7 +76,11 @@ replacement inside arbitrary PDFs.
 - **.pdf (best effort, explicit reformat):** extract text, rewrite, render into a clean
   standard resume template exported as PDF. Tell the user a PDF upload is reformatted,
   not cloned. Column structure is recovered from glyph positions (pdf.js item x/width),
-  not guessed from the flattened string.
+  not guessed from the flattened string. The template has a range of densities and the
+  exporter compiles from loosest to tightest, stopping at the first that fits the page
+  count of the uploaded file — a one-page CV must not come back two pages long after two
+  accepted edits. A CV that is genuinely longer keeps the extra page rather than being
+  crushed to fit.
   In-place editing was investigated and rejected on evidence — see below.
 
 ## Tech stack (decided)
