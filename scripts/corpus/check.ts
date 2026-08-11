@@ -83,12 +83,23 @@ async function checkTemplate(name: string): Promise<Result> {
   const entries = doc.blocks.filter((b) => b.kind === "entry") as {
     left: string;
     right: string;
+    stacked: boolean;
   }[];
   for (const row of allEntryRows()) {
-    const found = entries.some(
+    const match = entries.find(
       (e) => key(e.left) === key(row.left) && key(e.right) === key(row.right),
     );
-    if (!found) failures.push(`entry not split: "${row.left}" / "${row.right}"`);
+    if (!match) {
+      failures.push(`entry not split: "${row.left}" / "${row.right}"`);
+      continue;
+    }
+    // A technology stack must go below its title in every template, whatever
+    // its length; a date must stay opposite its own.
+    if (Boolean(row.stack) !== match.stacked) {
+      failures.push(
+        `stacked=${match.stacked} for "${row.left}" / "${row.right}" (expected ${Boolean(row.stack)})`,
+      );
+    }
   }
 
   // Every bullet must survive as a bullet.

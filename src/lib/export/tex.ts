@@ -106,11 +106,27 @@ export function stripLeadingListMarker(text: string): string {
 // Escape characters that would break LaTeX when inserting model-written
 // plain text into a source file. Backslash first.
 export function escapeTexText(text: string): string {
-  return text
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/([&%$#_{}])/g, "\\$1")
-    .replace(/~/g, "\\textasciitilde{}")
-    .replace(/\^/g, "\\textasciicircum{}");
+  return (
+    text
+      .replace(/\\/g, "\\textbackslash{}")
+      .replace(/([&%$#_{}])/g, "\\$1")
+      .replace(/~/g, "\\textasciitilde{}")
+      .replace(/\^/g, "\\textasciicircum{}")
+      /**
+       * Typographic punctuation has no glyph in the T1 fonts Tectonic loads by
+       * default, and TeX drops an unrepresentable character rather than
+       * failing: "05/2024 – 05/2025" compiled to a date range with nothing
+       * between the two dates. Mapped to the TeX ligatures that produce the
+       * same marks.
+       */
+      .replace(/—/g, "---")
+      .replace(/–/g, "--")
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/…/g, "\\ldots{}")
+      .replace(/[   ]/g, "~")
+      .replace(/[•·]/g, "\\textbullet{}")
+  );
 }
 
 /** Compile a .tex source with Tectonic; returns the PDF bytes. */

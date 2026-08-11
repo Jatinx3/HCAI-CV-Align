@@ -13,6 +13,12 @@ export type CorpusEntry = {
   subLeft?: string;
   subRight?: string;
   bullets: string[];
+  /**
+   * The right column is a technology stack rather than a date, so it belongs
+   * on the line beneath the title. Asserted, because deciding this by length
+   * once set one project's stack opposite its title and the next one below.
+   */
+  stack?: boolean;
 };
 
 export type CorpusSection = {
@@ -92,6 +98,35 @@ export const CV: CorpusCv = {
       ],
     },
     {
+      /**
+       * Project rows carry a technology stack where an experience row carries
+       * dates, and résumés write the stack at wildly different lengths. Two
+       * are included on purpose: a long stack and a short one, which is the
+       * pair that used to render differently from each other.
+       */
+      heading: "Projects",
+      entries: [
+        {
+          left: "Ledger Replay (link)",
+          right: "Python, Postgres, Kafka, Airflow, Terraform, Grafana",
+          stack: true,
+          bullets: [
+            "Rebuilt six months of settlement history from an event log to prove a reconciliation fix before it shipped.",
+            "Cut a replay of a full quarter from nine hours to under twenty minutes by partitioning on account.",
+          ],
+        },
+        {
+          left: "Route Atlas (link)",
+          right: "Go, Neo4j, Docker",
+          stack: true,
+          bullets: [
+            "Modelled the delivery network as a graph so planners could query alternative routes during an outage.",
+            "Served shortest-path queries over two million edges within the interactive budget of 200 milliseconds.",
+          ],
+        },
+      ],
+    },
+    {
       heading: "Technical Skills",
       labelled: [
         { label: "Languages", value: "Python, Go, TypeScript, SQL" },
@@ -110,11 +145,11 @@ export function allBullets(cv: CorpusCv = CV): string[] {
 /** Every title/date row, including sub-rows. */
 export function allEntryRows(
   cv: CorpusCv = CV,
-): { left: string; right: string }[] {
-  const rows: { left: string; right: string }[] = [];
+): { left: string; right: string; stack?: boolean }[] {
+  const rows: { left: string; right: string; stack?: boolean }[] = [];
   for (const s of cv.sections)
     for (const e of s.entries ?? []) {
-      rows.push({ left: e.left, right: e.right });
+      rows.push({ left: e.left, right: e.right, stack: e.stack });
       if (e.subLeft && e.subRight)
         rows.push({ left: e.subLeft, right: e.subRight });
     }

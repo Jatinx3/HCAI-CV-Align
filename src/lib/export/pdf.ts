@@ -58,6 +58,12 @@ function renderBlock(block: CvBlock): string {
     case "entry": {
       const left = escapeTexText(block.left);
       const right = escapeTexText(block.right);
+      // A technology stack is set on the line below its title, in italic. Set
+      // opposite the title with \hfill it would run past the right margin —
+      // TeX would print it anyway, over the edge of the page.
+      if (block.stacked) {
+        return `\\textbf{${left}}\\par\\textit{${right}}\\par`;
+      }
       // The sub-line of an entry — an institution under a degree, an employer
       // under a role — is set in italic, as résumé layouts do.
       return block.secondary

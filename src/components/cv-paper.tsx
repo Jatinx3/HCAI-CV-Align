@@ -50,7 +50,9 @@ export default function CvPaper({
             return (
               <div
                 key={i}
-                className={`cv-entry ${block.secondary ? "cv-entry-sub" : ""}`}
+                className={`cv-entry ${block.secondary ? "cv-entry-sub" : ""} ${
+                  block.stacked ? "cv-entry-stacked" : ""
+                }`}
               >
                 <span className="cv-entry-left">
                   <Marked text={block.left} highlights={highlights} />

@@ -93,7 +93,59 @@ function isPlaceLike(s: string): boolean {
   );
 }
 
-export function splitEntry(line: string): { left: string; right: string } | null {
+/**
+ * A right-hand column that lists tools rather than naming a date or a place:
+ * the technology stack résumés hang off a project title.
+ *
+ * Recognised by shape — comma-separated items, none of them long enough to be
+ * a sentence — rather than by length. Length was what decided this before, and
+ * it made the same row bold or plain depending on how many libraries the
+ * project happened to use.
+ */
+function isTechList(s: string, minParts = 3): boolean {
+  const t = s.trim();
+  if (!t || t.length > 120 || /[.!?]$/.test(t)) return false;
+  const parts = t
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  // Three items or more, because two are far more likely to be a place:
+  // "Dublin, Ireland" and "Tempe, AZ" are the right-hand column of an
+  // organisation row, not a stack. A title that ends in a link is already
+  // known to be a project, so two items are enough there.
+  if (parts.length < minParts) return false;
+  return parts.every((p) => p.length <= 44 && p.split(/\s+/).length <= 6);
+}
+
+/** How many comma-separated items count as a stack, given the title beside it. */
+function minStackParts(left: string): number {
+  return /\(link\)$/i.test(left.trim()) ? 2 : 3;
+}
+
+/** A left-hand column that reads as a title: no sentence, no "Label:" prefix. */
+function isEntryTitle(s: string): boolean {
+  const t = s.trim();
+  return (
+    t.length > 0 &&
+    t.length <= 80 &&
+    !/[.!?]$/.test(t) &&
+    !t.includes(":") &&
+    t.split(/\s+/).length <= 12
+  );
+}
+
+export type EntryParts = {
+  left: string;
+  right: string;
+  /**
+   * Whether the right column belongs on its own line beneath the title. A date
+   * sits opposite its title; a technology stack does not fit there, and forcing
+   * it into the same row overflows the measure.
+   */
+  stacked: boolean;
+};
+
+export function splitEntry(line: string): EntryParts | null {
   // A tab is a column boundary the page geometry proved, so it outranks every
   // guess below it. Some templates mark the organisation row with a bullet;
   // the row is still a title/place pair, not a list item.
@@ -101,7 +153,13 @@ export function splitEntry(line: string): { left: string; right: string } | null
     const [first, ...rest] = line.split("\t");
     const left = first.replace(BULLET, "").trim();
     const right = rest.join(" ").trim();
-    if (left && right) return { left, right };
+    if (left && right) {
+      return {
+        left,
+        right,
+        stacked: isTechList(right, minStackParts(left)),
+      };
+    }
     return null;
   }
 
@@ -113,8 +171,18 @@ export function splitEntry(line: string): { left: string; right: string } | null
   const piped = /^(.+?)\s+[|•·–—]\s+(.+)$/.exec(t);
   if (piped) {
     const [, left, right] = piped;
-    if (RIGHT_COLUMN.test(right) || isDateOnly(right) || isPlaceLike(right)) {
-      return { left: left.trim(), right: right.trim() };
+    if (RIGHT_COLUMN.test(right) || isDateOnly(right)) {
+      return { left: left.trim(), right: right.trim(), stacked: false };
+    }
+    // "Docu RAG (link) | Python, Pinecone, RocksDB" — a project and its stack.
+    // Tested before isPlaceLike, which a short stack also satisfies: deciding
+    // between them by length is what set one project opposite its title and
+    // the next one below it.
+    if (isEntryTitle(left) && isTechList(right, minStackParts(left))) {
+      return { left: left.trim(), right: right.trim(), stacked: true };
+    }
+    if (isPlaceLike(right)) {
+      return { left: left.trim(), right: right.trim(), stacked: false };
     }
   }
 
@@ -129,7 +197,7 @@ export function splitEntry(line: string): { left: string; right: string } | null
   const left = t.slice(0, at).trim();
   const right = t.slice(at).trim();
   if (!left || !right || !RIGHT_COLUMN.test(right)) return null;
-  return { left, right };
+  return { left, right, stacked: false };
 }
 
 /**
@@ -177,6 +245,30 @@ export function normaliseHeading(t: string): string {
  * entries — a role title followed by an achievement, each ending in a full
  * stop — on their own lines.
  */
+/**
+ * Word parts that are hyphenated because the author wrote them that way, not
+ * because the typesetter broke the line: "human-centered", "real-time". Both
+ * cases reach extraction as a trailing hyphen, and nothing in the text says
+ * which one it was, so the split is decided by whether the part before the
+ * hyphen is a prefix résumés genuinely hyphenate.
+ */
+const REAL_HYPHEN =
+  /^(human|multi|cross|self|real|sub|non|pre|post|re|open|end|full|part|time|high|low|data|cloud|micro|co|inter|intra|anti|semi|well|long|short|large|small|first|second|third|state|user|client|server|front|back|top|in|out)$/i;
+
+/**
+ * Rejoin a wrapped line. A line broken mid-word leaves a trailing hyphen —
+ * "…budget of 200 mil-" / "liseconds." — and joining with a space keeps the
+ * break visible in the CV the participant reads and in the text sent to the
+ * model.
+ */
+function joinWrapped(prev: string, line: string): string {
+  if (/[a-z]-$/.test(prev) && /^[a-z]/.test(line)) {
+    const stem = prev.slice(0, -1).split(/[\s(]/).pop() ?? "";
+    return REAL_HYPHEN.test(stem) ? `${prev}${line}` : `${prev.slice(0, -1)}${line}`;
+  }
+  return `${prev} ${line}`;
+}
+
 export function unwrapLines(lines: string[]): string[] {
   const out: string[] = [];
   for (const raw of lines) {
@@ -210,7 +302,7 @@ export function unwrapLines(lines: string[]): string[] {
           !line.includes("\t") &&
           !splitEntry(line)));
 
-    if (continues) out[out.length - 1] = `${prev} ${line}`;
+    if (continues) out[out.length - 1] = joinWrapped(prev, line);
     else out.push(line);
   }
   return out;
@@ -221,8 +313,16 @@ export type CvBlock =
   | { kind: "paragraph"; text: string }
   | { kind: "list"; items: string[] }
   /** A title/date row. `secondary` marks the sub-line of an entry (the
-      institution under a degree), which résumé layouts set in italic. */
-  | { kind: "entry"; left: string; right: string; secondary: boolean };
+      institution under a degree), which résumé layouts set in italic.
+      `stacked` puts the right column on its own line — a technology stack is
+      too long to sit opposite its title the way a date does. */
+  | {
+      kind: "entry";
+      left: string;
+      right: string;
+      secondary: boolean;
+      stacked: boolean;
+    };
 
 export type CvDoc = {
   /** First non-empty line, treated as the person's name. */
@@ -343,7 +443,13 @@ export function layoutCv(text: string): CvDoc {
     // document actually shows, and the organisation/location pair beneath it.
     const next = lines[i + 1]?.trim() ?? "";
     if (seenHeading && next && isDateOnly(next) && isShortField(t)) {
-      blocks.push({ kind: "entry", left: t, right: next, secondary: false });
+      blocks.push({
+        kind: "entry",
+        left: t,
+        right: next,
+        secondary: false,
+        stacked: false,
+      });
       i += 1;
       const org = lines[i + 1]?.trim() ?? "";
       const place = lines[i + 2]?.trim() ?? "";
@@ -353,6 +459,7 @@ export function layoutCv(text: string): CvDoc {
           left: org,
           right: place,
           secondary: true,
+          stacked: false,
         });
         i += 2;
       }
@@ -368,7 +475,11 @@ export function layoutCv(text: string): CvDoc {
         kind: "entry",
         left: entry.left,
         right: entry.right,
-        secondary: prev?.kind === "entry" && !prev.secondary,
+        // A project title carrying its own stack is never the sub-line of the
+        // project above it.
+        secondary:
+          !entry.stacked && prev?.kind === "entry" && !prev.secondary,
+        stacked: entry.stacked,
       });
       continue;
     }
@@ -396,6 +507,7 @@ export function layoutCv(text: string): CvDoc {
           left: pair.left,
           right: pair.right,
           secondary: true,
+          stacked: false,
         });
         continue;
       }
