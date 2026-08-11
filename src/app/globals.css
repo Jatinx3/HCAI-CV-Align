@@ -184,6 +184,13 @@ body {
   padding: 0 1px;
 }
 
+/* Tailwind's list-none hides the disclosure triangle everywhere except WebKit,
+   which uses its own pseudo-element. The value legend supplies its own
+   affordance, so the default marker would sit oddly inside its flex row. */
+summary.list-none::-webkit-details-marker {
+  display: none;
+}
+
 /* Visible keyboard focus everywhere; motion kept to color/opacity only. */
 :focus-visible {
   outline: 2px solid var(--ring);

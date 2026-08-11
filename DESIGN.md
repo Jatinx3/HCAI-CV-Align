@@ -55,6 +55,12 @@ When a design question is ambiguous, resolve in favour of the value, not conveni
 | Usability | Low friction, clear structure | Section-by-section flow, readable diffs, no dead ends |
 | Trust | Emergent, measured not built | No dedicated feature; supported by the above |
 
+The values are also named in the interface: the human-centered review screen labels each
+affordance with the value it carries and opens with a legend explaining them
+(`src/lib/values.ts` is the single source for both, so a chip and the legend cannot make
+different claims). One-click stays unlabelled — annotating the baseline would blunt the
+contrast the study measures.
+
 ## Output fidelity by input format
 
 Both modes export through the same per-format pipeline. Never attempt in-place text

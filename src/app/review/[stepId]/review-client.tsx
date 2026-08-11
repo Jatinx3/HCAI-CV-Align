@@ -6,6 +6,7 @@ import { assembleCv } from "@/lib/sections";
 import { wordDiff, findInJd } from "@/lib/diff";
 import { applyReplacement, containsOriginal } from "@/lib/anchor";
 import CvPaper from "@/components/cv-paper";
+import { ValueLegend, ValueTag } from "@/components/value-tag";
 import {
   CONSERVATISM_LEVELS,
   type ConservatismLevel,
@@ -406,13 +407,18 @@ export default function ReviewClient({
               you can undo any decision.
             </p>
 
+            <ValueLegend />
+
             <div className="mt-6">
-              <label
-                htmlFor="conservatism"
-                className="label-caps !text-foreground"
-              >
-                How assertive should suggestions be?
-              </label>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <label
+                  htmlFor="conservatism"
+                  className="label-caps !text-foreground"
+                >
+                  How assertive should suggestions be?
+                </label>
+                <ValueTag id="control" />
+              </div>
               <input
                 id="conservatism"
                 type="range"
@@ -435,9 +441,12 @@ export default function ReviewClient({
                 <strong>{level.label}</strong>{" "}
                 <span className="text-muted-foreground">— {level.hint}</span>
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                At every level the assistant may only rework what your CV
-                already says.
+              <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+                <ValueTag id="authenticity" />
+                <span>
+                  At every level the assistant may only rework what your CV
+                  already says.
+                </span>
               </p>
             </div>
 
@@ -479,9 +488,12 @@ export default function ReviewClient({
                     }}
                   />
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                  Sections are analysed one at a time against the job
-                  description. Results appear as each one finishes.
+                <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs leading-relaxed text-muted-foreground">
+                  <ValueTag id="usability" />
+                  <span>
+                    Sections are analysed one at a time against the job
+                    description. Results appear as each one finishes.
+                  </span>
                 </p>
               </div>
             )}
@@ -526,12 +538,15 @@ export default function ReviewClient({
           {meta && (meta.droppedInvalid > 0 || meta.failures.length > 0) && (
             <div className="border-l-2 border-warning bg-warning-soft p-4 text-sm leading-relaxed text-warning">
               {meta.droppedInvalid > 0 && (
-                <p>
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <ValueTag id="transparency" />
+                  <span>
                   {meta.droppedInvalid} proposed change
                   {meta.droppedInvalid === 1 ? " was" : "s were"} discarded for
                   not meeting the transparency rules — a suggestion must quote
                   your real text, explain itself, and cite a job-description
                   requirement.
+                  </span>
                 </p>
               )}
               {meta.failures.length > 0 && (
@@ -553,6 +568,7 @@ export default function ReviewClient({
                 Choose how assertive you want the assistant to be, then ask for
                 suggestions. Your CV is not changed until you accept something.
               </p>
+              <ValueTag id="control" className="mt-3" />
             </div>
           )}
 
@@ -566,6 +582,7 @@ export default function ReviewClient({
                 without inventing content. Try a more assertive level, or a job
                 description with more detail.
               </p>
+              <ValueTag id="authenticity" className="mt-3" />
             </div>
           )}
 
@@ -629,7 +646,10 @@ export default function ReviewClient({
 
                 {sectionGaps.length > 0 && (
                   <div className="border border-dashed border-border-strong bg-background p-4">
-                    <p className="label-caps">Not evidenced in this section</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <p className="label-caps">Not evidenced in this section</p>
+                      <ValueTag id="authenticity" />
+                    </div>
                     <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                       The assistant will not invent these. Add them yourself
                       only if they are genuinely true of you.
@@ -680,6 +700,7 @@ export default function ReviewClient({
             {rail === "cv" ? (
               <>
                 <div className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-2">
+                  <ValueTag id="control" />
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     {applied.length === 0
                       ? "Unchanged so far. Your original is never overwritten."
@@ -1130,10 +1151,15 @@ function SuggestionCard({
         </p>
       </details>
 
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-        <span className="font-semibold text-foreground">Why: </span>
-        {s.explanation}
-      </p>
+      {/* Transparency: one chip covers both halves of the contract — the cited
+          requirement above and the plain-language reason here. */}
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <ValueTag id="transparency" />
+        <p className="flex-1 text-sm leading-relaxed text-muted-foreground">
+          <span className="font-semibold text-foreground">Why: </span>
+          {s.explanation}
+        </p>
+      </div>
 
       {unappliable && (
         <p className="mt-3 border-l-2 border-warning bg-warning-soft p-2 text-xs leading-relaxed text-warning">
@@ -1142,7 +1168,16 @@ function SuggestionCard({
         </p>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <ValueTag id="control" />
+        <p className="text-xs leading-relaxed text-faint-foreground">
+          {decided
+            ? "Your decision, and you can take it back."
+            : "Nothing is applied until you choose."}
+        </p>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-2">
         {isEditing ? (
           <>
             <button
