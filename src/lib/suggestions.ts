@@ -101,6 +101,9 @@ What a suggestion is:
   quote a whole section, several entries, or multiple bullets in a single suggestion.
 - Do not propose changes to factual records that have no wording to improve: degree
   titles, employer names, dates, grades, and contact details.
+- Keep the capitalisation the original starts with. A quoted passage that begins with a
+  lower-case letter continues a sentence, even when it reads like one on its own, and
+  capitalising it puts a capital in the middle of the line it is spliced back into.
 
 Conservatism level: ${level} of 5 — ${conservatismDescription(level)}
 Conservative means minimal, light-touch edits close to the original wording. Assertive
@@ -295,13 +298,65 @@ export function validateSuggestions(
       id: `${section.id}-s${i}`,
       sectionId: section.id,
       original,
-      suggested,
+      suggested: matchLeadingCase(original, suggested, sectionText),
       explanation,
       jdRequirement,
     });
   });
 
   return { suggestions, rejected };
+}
+
+/**
+ * Give a proposal the capitalisation of the passage it replaces.
+ *
+ * A quoted passage that starts lower-case continues a sentence, but read on its
+ * own it looks like one, and models capitalise it. Spliced back in, that puts a
+ * capital mid-line — and where the passage was the tail of a wrapped bullet, it
+ * used to break the bullet apart entirely.
+ *
+ * The prompt asks for this too. It is enforced here because a prompt is a
+ * request: the same instruction was already being ignored often enough to reach
+ * an exported CV.
+ *
+ * A first word that appears capitalised elsewhere in the section is left alone —
+ * "Python" and "AWS" are capitalised because of what they are, not because of
+ * where they sit in the sentence.
+ */
+function matchLeadingCase(
+  original: string,
+  suggested: string,
+  sectionText: string,
+): string {
+  const o = original[0];
+  const s = suggested[0];
+  if (!o || !s) return suggested;
+
+  const isLower = (c: string) => c.toLowerCase() === c && c.toUpperCase() !== c;
+  const isUpper = (c: string) => c.toUpperCase() === c && c.toLowerCase() !== c;
+
+  // The original begins a sentence and the proposal does not: always safe.
+  if (isUpper(o) && isLower(s)) return s.toUpperCase() + suggested.slice(1);
+
+  if (!(isLower(o) && isUpper(s))) return suggested;
+
+  const firstWord = suggested.split(/\s+/)[0].replace(/[^\p{L}]/gu, "");
+  // An acronym is never lower-cased.
+  if (firstWord.length > 1 && firstWord === firstWord.toUpperCase()) {
+    return suggested;
+  }
+  // Capitalised elsewhere in the section, away from the start of a line, so it
+  // is a name rather than a sentence opener.
+  const elsewhere = new RegExp(`\\S\\s+${escapeRegExp(firstWord)}\\b`).test(
+    sectionText,
+  );
+  if (elsewhere) return suggested;
+
+  return s.toLowerCase() + suggested.slice(1);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
