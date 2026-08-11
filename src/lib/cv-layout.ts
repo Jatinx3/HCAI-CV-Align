@@ -11,15 +11,25 @@
 
 export const BULLET = /^\s*[•\-–*]\s+/;
 
+const KNOWN_HEADING =
+  /^(summary|profile|experience|work experience|employment|skills|education|projects|certifications|publications|awards|interests|references|languages)$/i;
+
+/**
+ * A heading a résumé actually names, rather than a line that merely looks like
+ * one. An ALL-CAPS fragment is shape-identical to a heading — "RBAC." left at
+ * the start of a wrapped line is not a section — so the vocabulary is what
+ * settles it when the surrounding text says the line is a continuation.
+ */
+export function isNamedSection(line: string): boolean {
+  const t = line.trim().replace(/[:\s]+$/, "");
+  return KNOWN_HEADING.test(t) || SECTION_NAME.test(t);
+}
+
 export function isHeading(line: string): boolean {
   const t = line.trim();
   if (!t || t.length > 48 || BULLET.test(t)) return false;
   const caps = t === t.toUpperCase() && /[A-Z]/.test(t);
-  const knownHeading =
-    /^(summary|profile|experience|work experience|employment|skills|education|projects|certifications|publications|awards|interests|references|languages)$/i.test(
-      t,
-    );
-  if (caps || knownHeading) return true;
+  if (caps || KNOWN_HEADING.test(t)) return true;
 
   /**
    * Title Case section names — "Professional Experience", "Technical Skills".
@@ -275,11 +285,33 @@ export function unwrapLines(lines: string[]): string[] {
     const line = raw.trim();
     const prev = out[out.length - 1];
 
+    /**
+     * The previous line stopped mid-clause — on a comma, a conjunction, a
+     * preposition. Whatever follows finishes it, and no résumé starts a
+     * section with the word after "and".
+     *
+     * This outranks the shape of the next line, which is the only way to
+     * settle an ALL-CAPS fragment: "…real-time messaging, and" / "RBAC." puts
+     * an acronym at the start of a wrapped line, and an acronym is
+     * indistinguishable from a section heading by shape alone. It was being
+     * promoted to one — printed as "Rbac." — which broke the bullet in half
+     * and split the list around it.
+     *
+     * A name a résumé actually gives a section still wins, so a genuine
+     * heading after an unpunctuated line is not swallowed.
+     */
+    const dangling =
+      prev !== undefined &&
+      /(,|;|:|-|–|—|\/|&)$|\b(and|or|with|for|of|to|in|on|at|by|from|using|the|a|an|as|into|via)$/i.test(
+        prev,
+      ) &&
+      !isNamedSection(line);
+
     const continues =
       prev !== undefined &&
       prev.length > 0 &&
       line.length > 0 &&
-      !isHeading(line) &&
+      (dangling || !isHeading(line)) &&
       !isHeading(prev) &&
       // a continuation is never itself a bullet, though it may continue one:
       // long bullets wrap, and "…serving 20K+ daily" / "operations" is one
@@ -304,7 +336,8 @@ export function unwrapLines(lines: string[]): string[] {
       // …and this one does not begin a new entry. A line may still start with
       // a capital and be a continuation when it closes a bracket the previous
       // line opened: "…MSc in Computer Science (Human-Centered" / "AI), …".
-      (/^[a-z(]/.test(line) ||
+      (dangling ||
+        /^[a-z(]/.test(line) ||
         (/\([^)]*$/.test(prev) && /^[^(]*\)/.test(line)) ||
         // Inside a bullet, a following unmarked line is a wrap, whatever its
         // case: a new item would carry its own marker. This is what rescues

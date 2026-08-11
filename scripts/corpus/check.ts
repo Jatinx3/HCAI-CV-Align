@@ -19,7 +19,7 @@ import { promisify } from "node:util";
 import { CV, allBullets, allEntryRows } from "./content";
 import { TEMPLATES } from "./templates";
 import { extractText } from "../../src/lib/extract";
-import { layoutCv } from "../../src/lib/cv-layout";
+import { layoutCv, unwrapLines } from "../../src/lib/cv-layout";
 
 const run = promisify(execFile);
 const OUT = new URL("./out/", import.meta.url).pathname;
@@ -163,10 +163,72 @@ async function checkTemplate(name: string): Promise<Result> {
   };
 }
 
+/**
+ * Line-joining cases the generated PDFs cannot be made to produce on demand.
+ *
+ * Where a template breaks a line depends on its measure, so a corpus of whole
+ * documents cannot guarantee that a wrap lands on the word a rule is about.
+ * These are the wraps that have actually broken a real CV, written directly as
+ * the two lines extraction produced.
+ */
+function checkLayoutRules(): Result {
+  const failures: string[] = [];
+
+  const cases: { name: string; lines: string[]; expect: number }[] = [
+    {
+      // An acronym at the start of a continuation line is shape-identical to a
+      // section heading; it was promoted to one and printed as "Rbac.".
+      name: "acronym after a dangling conjunction",
+      lines: [
+        "• Designed and deployed a production Next.js/PostgreSQL SaaS platform with active users, real-time messaging, and",
+        "RBAC.",
+      ],
+      expect: 1,
+    },
+    {
+      // A semicolon is a clause break inside a bullet, and the fragment after
+      // it may have been capitalised by an accepted suggestion.
+      name: "capitalised fragment after a semicolon",
+      lines: [
+        "• Built a Python FastAPI backend, cutting query latency by 60%;",
+        "Rolled out on Hugging Face Spaces with sub-200ms p95 response times.",
+      ],
+      expect: 1,
+    },
+    {
+      // The safety net: an unpunctuated line before a real section heading.
+      name: "genuine heading after an unpunctuated line",
+      lines: ["Tools: GitHub, Postman, JIRA", "PROJECTS"],
+      expect: 2,
+    },
+    {
+      // A trailing comma must not swallow the section that follows it.
+      name: "genuine heading after a trailing comma",
+      lines: ["Languages: Python, Go,", "Education"],
+      expect: 2,
+    },
+  ];
+
+  for (const c of cases) {
+    const got = unwrapLines(c.lines).length;
+    if (got !== c.expect) {
+      failures.push(`${c.name}: ${got} line(s), expected ${c.expect}`);
+    }
+  }
+
+  return {
+    template: "line joining",
+    failures,
+    stats: `${cases.length} cases`,
+  };
+}
+
 (async () => {
   const only = process.argv[2];
   const names = only ? [only] : Object.keys(TEMPLATES);
-  const results: Result[] = [];
+  const results: Result[] = [only ? null : checkLayoutRules()].filter(
+    (r): r is Result => r !== null,
+  );
 
   for (const name of names) {
     try {
