@@ -73,7 +73,9 @@ export async function exportCv(opts: {
         () => 1,
       );
 
-      if (process.env.PDF_INPLACE_EDIT !== "true") {
+      // On by default now that redaction removes the original run rather than
+      // covering it. PDF_INPLACE_EDIT=false forces the clean template.
+      if (process.env.PDF_INPLACE_EDIT === "false") {
         return {
           pdf: await renderCleanPdf(opts.fullText, originalPages),
           unplaced: [],

@@ -63,8 +63,7 @@ contrast the study measures.
 
 ## Output fidelity by input format
 
-Both modes export through the same per-format pipeline. Never attempt in-place text
-replacement inside arbitrary PDFs.
+Both modes export through the same per-format pipeline.
 
 - **.tex (highest fidelity):** parse source, separate content blocks from preamble and
   formatting, send only content to model, splice rewritten content back into untouched
@@ -73,14 +72,25 @@ replacement inside arbitrary PDFs.
 - **.docx (high fidelity):** extract text runs with styles, rewrite text, write back into
   same runs preserving paragraph/run styles, convert to PDF via LibreOffice headless.
   Some reflow expected when text length changes.
-- **.pdf (best effort, explicit reformat):** extract text, rewrite, render into a clean
-  standard resume template exported as PDF. Tell the user a PDF upload is reformatted,
-  not cloned. Column structure is recovered from glyph positions (pdf.js item x/width),
-  not guessed from the flattened string. The template has a range of densities and the
-  exporter compiles from loosest to tightest, stopping at the first that fits the page
-  count of the uploaded file — a one-page CV must not come back two pages long after two
-  accepted edits. A CV that is genuinely longer keeps the extra page rather than being
-  crushed to fit.
+- **.pdf (in place first, clean reformat as fallback):** accepted changes are redacted
+  out of the uploaded file with MuPDF — real redaction, the glyphs leave the content
+  stream — and the replacement is drawn into the space the original occupied with
+  pdf-lib. The result is verified before it is returned (page count unchanged, new
+  wording present, replaced wording absent) and any failure falls back to the clean
+  template for the whole document; a page that is half the author's design and half ours
+  is worse than either. `PDF_INPLACE_EDIT=false` forces the fallback.
+  Two limits are inherent: the embedded font is a subset holding only the glyphs the
+  original used, so replacements are drawn in the nearest standard font (family, weight
+  and slope matched); and a PDF has no reflow, so a replacement must fit the lines the
+  original occupied — shrinking up to 10% is allowed, beyond that the change is reported
+  as unplaced.
+  The fallback path: extract text, rewrite, render into a clean standard resume template.
+  Tell the user a reformatted PDF is not a clone. Column structure is recovered from
+  glyph positions (pdf.js item x/width), not guessed from the flattened string. The
+  template has a range of densities and the exporter compiles from loosest to tightest,
+  stopping at the first that fits the page count of the uploaded file — a one-page CV
+  must not come back two pages long after two accepted edits. A CV that is genuinely
+  longer keeps the extra page rather than being crushed to fit.
   In-place editing was investigated and rejected on evidence — see below.
 
 ## Tech stack (decided)
@@ -120,13 +130,13 @@ No names, emails, or identifying content beyond the uploaded CV.
 
 - Bias detection, demographic inference, fairness scoring.
 - Audit trails or compliance tooling framed as accountability features.
-- In-place text replacement inside arbitrary PDFs. Attempted behind
-  `PDF_INPLACE_EDIT=true` (`src/lib/export/pdf-inplace.ts`) and left disabled: without
-  rewriting the page content stream, an edit can only paint over the original run, and
-  painting over does not delete. Both the old and the new wording stay in the text layer,
-  so an ATS would read a contradictory CV that looks correct on screen. Verified across
-  the generated corpus (`npm run corpus`); every template fell back. Doing this properly
-  requires true redaction at the content-stream level.
+- Painting over text in a PDF instead of redacting it. The first attempt at in-place
+  editing did exactly that, because pdf-lib cannot delete a run: both the old and the new
+  wording stayed in the text layer, so an ATS would have read a contradictory CV that
+  looked correct on screen. MuPDF's redaction removes the glyphs, which is why the path
+  is now enabled — but the verification that caught the original failure
+  (`verifyInPlace`, `scripts/corpus/check-inplace.ts`) stays, and any output that fails
+  it falls back to the clean template.
 - Anything that fabricates or embellishes CV content in human-centered mode.
 
 ## Build phases
