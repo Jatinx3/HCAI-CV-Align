@@ -45,6 +45,46 @@ type Quad = [number, number, number, number, number, number, number, number];
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
+/** A positioned text run of the original, as pdf.js reports it. */
+type Fragment = { page: number; x: number; baseline: number; text: string };
+
+/**
+ * Text runs with their true baselines.
+ *
+ * MuPDF is what can delete a run, but the `y` it reports for a line sits about
+ * a point above the baseline, and drawing there leaves the replacement riding
+ * high against the lines around it. pdf.js reports the text-space origin of
+ * each run, which is the baseline pdf-lib draws from, so each library is used
+ * for the thing it is exact at: MuPDF for the redaction, pdf.js for placement.
+ */
+async function readFragments(data: Buffer): Promise<Fragment[]> {
+  const fragments: Fragment[] = [];
+  let page = -1;
+  await pdfParse(data, {
+    pagerender: (p: {
+      getTextContent: () => Promise<{
+        items: { str: string; transform: number[] }[];
+      }>;
+    }) => {
+      page += 1;
+      const current = page;
+      return p.getTextContent().then((content) => {
+        for (const item of content.items) {
+          if (!item.str.trim()) continue;
+          fragments.push({
+            page: current,
+            x: item.transform[4],
+            baseline: item.transform[5],
+            text: item.str,
+          });
+        }
+        return "";
+      });
+    },
+  });
+  return fragments;
+}
+
 /**
  * Load mupdf at call time rather than at module scope.
  *
@@ -160,6 +200,7 @@ export async function editPdfInPlace(
   }
 
   const mupdf = await loadMupdf();
+  const fragments = await readFragments(original).catch(() => [] as Fragment[]);
 
   let doc: InstanceType<typeof mupdf.PDFDocument>;
   try {
@@ -307,10 +348,21 @@ export async function editPdfInPlace(
     const height = page.getHeight();
     laidOut.forEach((text, i) => {
       const line = match.lines[i];
+      // pdf-lib measures from the bottom of the page, MuPDF from the top.
+      const fromMupdf = height - line.baseline;
+      // Prefer the baseline pdf.js reports for the run being replaced: it is
+      // the same quantity pdf-lib draws from, so the replacement sits on the
+      // line rather than a point above it.
+      const quad = match.quads[i];
+      const near = fragments.find(
+        (f) =>
+          f.page === match.page &&
+          Math.abs(f.baseline - fromMupdf) <= 4 &&
+          Math.abs(f.x - Math.min(quad[0], quad[4])) <= 14,
+      );
       page.drawText(text, {
         x: i === 0 ? startX : left,
-        // pdf-lib measures from the bottom of the page, MuPDF from the top.
-        y: height - line.baseline,
+        y: near ? near.baseline : fromMupdf,
         size,
         font,
         color: rgb(0, 0, 0),

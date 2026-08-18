@@ -75,7 +75,17 @@ export async function exportCv(opts: {
 
       // On by default now that redaction removes the original run rather than
       // covering it. PDF_INPLACE_EDIT=false forces the clean template.
-      if (process.env.PDF_INPLACE_EDIT === "false") {
+      /**
+       * With nothing to place, in-place editing has nothing to do and returns
+       * the file untouched — which is correct for a CV with no accepted
+       * changes, and silently wrong for a whole-document rewrite that arrives
+       * as `fullText` with no spans. One-click did exactly that, and its PDF
+       * output came back byte-identical to the upload.
+       */
+      if (
+        process.env.PDF_INPLACE_EDIT === "false" ||
+        opts.replacements.length === 0
+      ) {
         return {
           pdf: await renderCleanPdf(opts.fullText, originalPages),
           unplaced: [],

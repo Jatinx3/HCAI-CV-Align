@@ -92,11 +92,14 @@ export async function POST(request: Request) {
     const result = await exportCv({
       format,
       originalData: Buffer.from(doc.data),
-      // tex/docx splice line-aligned edits; pdf renders the full rewrite.
-      replacements:
-        format === "pdf"
-          ? []
-          : deriveLineReplacements(doc.extractedText, rewritten),
+      /**
+       * Line-aligned edits for every format, PDF included. The baseline is
+       * deliberately thin in what it lets the applicant decide, not in what it
+       * produces: both modes export through the same pipeline, so a difference
+       * the study measures is a difference in the interaction model rather
+       * than in how well the download survived.
+       */
+      replacements: deriveLineReplacements(doc.extractedText, rewritten),
       fullText: rewritten,
     });
 
