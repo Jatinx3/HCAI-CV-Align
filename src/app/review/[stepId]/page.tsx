@@ -60,6 +60,7 @@ export default async function ReviewPage({
         jdText={step.jdText}
         initialSections={sections}
         format={step.cvDocument.format}
+        guided={step.studySessionId !== null}
       />
     </div>
   );

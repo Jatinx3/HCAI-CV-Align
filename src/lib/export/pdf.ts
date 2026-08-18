@@ -45,7 +45,7 @@ type Density = {
  * 2.2cm were the old fixed geometry, and they cost a page: the same CV that
  * fits on one sheet at the margins résumés are actually set with needed two.
  */
-export const DENSITIES: Density[] = [
+const DENSITIES: Density[] = [
   { margin: "1.4cm", entryGap: "2.5pt", paraGap: "1.5pt", itemsep: "0.5pt", listTop: "1.5pt", sectionSkip: "6pt", linespread: "1.0" },
   { margin: "1.3cm", entryGap: "2pt", paraGap: "1.2pt", itemsep: "0.3pt", listTop: "1.2pt", sectionSkip: "5pt", linespread: "0.99" },
   { margin: "1.2cm", entryGap: "1.5pt", paraGap: "1pt", itemsep: "0.2pt", listTop: "1pt", sectionSkip: "4.5pt", linespread: "0.98" },
@@ -128,7 +128,6 @@ function renderBlock(block: CvBlock, d: Density): string {
   }
 }
 
-/** Render rewritten plain text into a clean standard resume PDF. */
 /**
  * Compile the clean template, tightening it until it fits.
  *

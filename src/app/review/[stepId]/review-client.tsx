@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type { CvSection } from "@/lib/sections";
 import { assembleCv } from "@/lib/sections";
 import { wordDiff, findInJd } from "@/lib/diff";
@@ -51,12 +52,15 @@ export default function ReviewClient({
   jdText,
   initialSections,
   format,
+  guided = false,
 }: {
   stepId: string;
   cvId: string;
   jdText: string;
   initialSections: CvSection[];
   format: string;
+  /** Part of a guided study session, so finishing here continues the session. */
+  guided?: boolean;
 }) {
   const [conservatism, setConservatism] = useState<ConservatismLevel>(3);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -80,6 +84,8 @@ export default function ReviewClient({
 
   const [exporting, setExporting] = useState(false);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  /** Guided sessions only: the export closed this step, so there is a next one. */
+  const [stepDone, setStepDone] = useState(false);
 
   const [rail, setRail] = useState<"cv" | "jd">("cv");
   const [cvView, setCvView] = useState<"document" | "text">("document");
@@ -361,6 +367,7 @@ export default function ReviewClient({
           ? `Downloaded. ${unplaced} accepted change${unplaced === 1 ? "" : "s"} could not be placed back into your original layout and ${unplaced === 1 ? "is" : "are"} missing from the PDF.`
           : "Downloaded.",
       );
+      setStepDone(true);
     } catch {
       setExportNote("Export failed. Check your connection.");
     } finally {
@@ -807,6 +814,17 @@ export default function ReviewClient({
             >
               {exporting ? "Building PDF…" : "Download as PDF"}
             </button>
+            {/* Downloading closes this step of a guided session. The link is
+                offered rather than taken automatically, so a participant can
+                download again or keep reading before moving on. */}
+            {guided && stepDone && (
+              <Link
+                href="/"
+                className="h-10 cursor-pointer border border-accent bg-accent-soft px-5 text-sm font-semibold leading-10 text-accent transition-colors duration-150 hover:opacity-90"
+              >
+                Continue the session
+              </Link>
+            )}
           </div>
           {exportNote && (
             <p

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { studyStepData } from "@/lib/study";
 import { exportCv } from "@/lib/export";
 import type { CvFormat } from "@/lib/extract";
 import {
@@ -49,6 +50,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CV not found" }, { status: 404 });
   }
 
+  const study = await studyStepData(user.id, user.studyParticipant, "ONE_CLICK");
+  if (!study.ok) {
+    return NextResponse.json({ error: study.error }, { status: 409 });
+  }
+
   const step = await prisma.modeStep.create({
     data: {
       userId: user.id,
@@ -57,6 +63,7 @@ export async function POST(request: Request) {
       cvFileName: doc.fileName,
       cvFormat: doc.format,
       jdText,
+      ...(study.data ?? {}),
     },
   });
 

@@ -16,7 +16,7 @@ function escapeRegex(s: string): string {
 export type Anchor = { start: number; end: number };
 
 /** Find `original` in `text`, tolerating differences in whitespace only. */
-export function locateOriginal(text: string, original: string): Anchor | null {
+function locateOriginal(text: string, original: string): Anchor | null {
   const needle = original.trim();
   if (!needle) return null;
 

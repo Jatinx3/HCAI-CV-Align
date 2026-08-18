@@ -94,7 +94,16 @@ function IconAlert({ className }: { className?: string }) {
   );
 }
 
-export default function UploadForm() {
+export default function UploadForm({
+  guidedMode,
+}: {
+  /**
+   * In a guided study session, the mode assigned for the step the participant
+   * is on. Only that mode is offered: the order is the experimental control
+   * and is not the participant's to choose.
+   */
+  guidedMode?: "ONE_CLICK" | "HUMAN_CENTERED";
+} = {}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [jdText, setJdText] = useState("");
@@ -172,6 +181,9 @@ export default function UploadForm() {
       a.click();
       URL.revokeObjectURL(url);
       setOneClickNote("Rewritten CV downloaded.");
+      // In a guided session the download is the end of this step, so send the
+      // participant back to the session, which decides what comes next.
+      if (guidedMode) router.refresh();
     } catch {
       setError({
         title: "Couldn\u2019t rewrite your CV",
@@ -223,8 +235,16 @@ export default function UploadForm() {
   return (
     <div className="flex flex-col gap-12">
       {/* The design stance, stated up front — transparency about what this
-          tool will and won't do, before any AI runs. */}
-      <section aria-label="How this assistant works">
+          tool will and won't do, before any AI runs.
+
+          Hidden on the one-click step of a guided session. These three claims
+          describe the human-centered mode, and showing them to a participant
+          about to use the baseline would sell the prototype's values while
+          they judged the system that deliberately lacks them. */}
+      <section
+        aria-label="How this assistant works"
+        className={guidedMode === "ONE_CLICK" ? "hidden" : undefined}
+      >
         <div className="grid gap-px overflow-hidden border border-border bg-border sm:grid-cols-3">
           {PRINCIPLES.map((item) => (
             <div key={item.n} className="bg-surface p-5">
@@ -452,15 +472,25 @@ export default function UploadForm() {
           </div>
 
           <div className="border-t border-border pt-5">
-            <p className="label-caps">Choose how to rewrite</p>
+            <p className="label-caps">
+              {guidedMode ? "This part of the session" : "Choose how to rewrite"}
+            </p>
             {!jdText.trim() && (
               <p className="mt-2 text-sm text-muted-foreground">
                 Paste a job description above to continue.
               </p>
             )}
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              {/* Human-centered — the prototype. */}
-              <div className="flex flex-col border border-border p-4">
+            <div
+              className={`mt-3 grid gap-4 ${guidedMode ? "" : "sm:grid-cols-2"}`}
+            >
+              {/* Human-centered — the prototype. In a guided session only the
+                  mode assigned for this step is offered; the participant does
+                  not choose the order. */}
+              <div
+                className={`flex-col border border-border p-4 ${
+                  guidedMode === "ONE_CLICK" ? "hidden" : "flex"
+                }`}
+              >
                 <h3 className="font-serif text-lg font-semibold text-foreground">
                   Review each change
                 </h3>
@@ -479,7 +509,11 @@ export default function UploadForm() {
               </div>
 
               {/* One-click — the deliberately thin baseline. */}
-              <div className="flex flex-col border border-border p-4">
+              <div
+                className={`flex-col border border-border p-4 ${
+                  guidedMode === "HUMAN_CENTERED" ? "hidden" : "flex"
+                }`}
+              >
                 <h3 className="font-serif text-lg font-semibold text-foreground">
                   One-click rewrite
                 </h3>

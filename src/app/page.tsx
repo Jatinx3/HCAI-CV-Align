@@ -1,8 +1,23 @@
+import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
+import { studyState } from "@/lib/study";
 import UploadForm from "./upload-form";
+import StudyBanner from "./study-banner";
 
 export default async function Home() {
   const session = await auth();
+
+  /**
+   * A study participant is walked through both modes in a fixed, assigned
+   * order; a general user chooses freely. The session is created on first
+   * arrival, so the order is fixed before any work is done rather than after
+   * the participant has seen one of the systems.
+   */
+  const study =
+    session?.user?.studyParticipant && session.user.id
+      ? await studyState(session.user.id)
+      : null;
+  if (study?.finished) redirect("/study/feedback");
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -51,7 +66,14 @@ export default async function Home() {
             <em className="font-serif">honestly</em>.
           </p>
         </div>
-        <UploadForm />
+        {study && (
+          <StudyBanner
+            stepIndex={study.stepIndex}
+            mode={study.mode}
+            resumeStepId={study.resumeStepId}
+          />
+        )}
+        <UploadForm guidedMode={study?.mode} />
       </main>
 
       <footer className="border-t border-border">

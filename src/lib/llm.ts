@@ -27,7 +27,7 @@ export type CompletionRequest = {
 export class LlmConfigError extends Error {}
 export class LlmCallError extends Error {}
 
-export function activeProvider(): LlmProvider {
+function activeProvider(): LlmProvider {
   const raw = (process.env.LLM_PROVIDER ?? "openrouter").toLowerCase();
   if (raw !== "openrouter" && raw !== "anthropic" && raw !== "stub") {
     throw new LlmConfigError(

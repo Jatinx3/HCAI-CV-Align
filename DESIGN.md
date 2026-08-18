@@ -148,7 +148,15 @@ Work in phases; commit at end of each; pause for confirmation before the next.
 4. Format-preserving export pipeline (three output paths, shared by both modes)
 5. Human-centered mode (section parsing, suggestion API, accept/reject/edit UI, slider)
 6. One-click mode (plain rewrite route, minimal screen)
-7. Guided study session (counterbalancing, two-mode walkthrough, feedback handoff)
+7. Guided study session (counterbalancing, two-mode walkthrough, feedback handoff) ✅
+   Order is assigned server-side on the participant's first arrival, taking whichever
+   arm is behind (ties broken at random), and the mode for a step is enforced in the
+   API routes — a participant cannot choose or reorder. A step closes when its export
+   completes; an abandoned step is resumed rather than duplicated. Reaching the handoff
+   is recorded on the session, and the forced-choice preference is kept locally as a
+   backup for the external form (`STUDY_FEEDBACK_FORM_URL`). The three principle cards
+   are hidden on the one-click step: they describe the prototype's values, and showing
+   them to a participant about to use the baseline would sell what the baseline lacks.
 8. Telemetry
 9. Polish (empty states, error handling, readable diffs — no feature creep)
 

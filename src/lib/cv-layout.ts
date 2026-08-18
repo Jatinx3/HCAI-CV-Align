@@ -9,7 +9,7 @@
  * Client-safe by construction: no node built-ins, no server-only imports.
  */
 
-export const BULLET = /^\s*[•\-–*]\s+/;
+const BULLET = /^\s*[•\-–*]\s+/;
 
 const KNOWN_HEADING =
   /^(summary|profile|experience|work experience|employment|skills|education|projects|certifications|publications|awards|interests|references|languages)$/i;
@@ -20,12 +20,12 @@ const KNOWN_HEADING =
  * the start of a wrapped line is not a section — so the vocabulary is what
  * settles it when the surrounding text says the line is a continuation.
  */
-export function isNamedSection(line: string): boolean {
+function isNamedSection(line: string): boolean {
   const t = line.trim().replace(/[:\s]+$/, "");
   return KNOWN_HEADING.test(t) || SECTION_NAME.test(t);
 }
 
-export function isHeading(line: string): boolean {
+function isHeading(line: string): boolean {
   const t = line.trim();
   if (!t || t.length > 48 || BULLET.test(t)) return false;
   const caps = t === t.toUpperCase() && /[A-Z]/.test(t);
@@ -76,7 +76,7 @@ export function isDateOnly(line: string): boolean {
 }
 
 /** A short line with no sentence punctuation — an organisation or a place. */
-export function isShortField(line: string): boolean {
+function isShortField(line: string): boolean {
   const t = line.trim();
   return (
     t.length > 0 &&
@@ -217,7 +217,7 @@ export function splitEntry(line: string): EntryParts | null {
  * the line directly beneath an entry — the position a résumé reserves for
  * exactly that pair.
  */
-export function splitTrailingProper(
+function splitTrailingProper(
   line: string,
 ): { left: string; right: string } | null {
   const t = line.trim();
@@ -229,7 +229,7 @@ export function splitTrailingProper(
   return { left: t.slice(0, m.index).trim(), right: t.slice(m.index).trim() };
 }
 
-export function titleCase(s: string): string {
+function titleCase(s: string): string {
   const lower = s.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
@@ -239,7 +239,7 @@ export function titleCase(s: string): string {
  * folded to sentence case. Headings that already carry their own casing —
  * "Professional Experience" — are left exactly as the author wrote them.
  */
-export function normaliseHeading(t: string): string {
+function normaliseHeading(t: string): string {
   const isAllCaps = t === t.toUpperCase() && /[A-Z]/.test(t);
   return isAllCaps ? titleCase(t) : t;
 }
@@ -385,7 +385,7 @@ export type CvDoc = {
  * leaving "+353 87 380 3453 name@example.com linkedin.com/in/x" as one string
  * in which the reader cannot see where one detail ends and the next begins.
  */
-export function splitContactRun(line: string): string[] {
+function splitContactRun(line: string): string[] {
   const t = line.trim();
   if (!t) return [];
 
