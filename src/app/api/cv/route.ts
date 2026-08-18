@@ -70,10 +70,16 @@ export async function POST(request: Request) {
     fileName: doc.fileName,
     format: doc.format,
     extractedText: doc.extractedText,
-    // PDF output is an explicit reformat, not a clone — surface this early.
+    /**
+     * A PDF keeps its own design unless an accepted change cannot be made to
+     * fit the lines it replaces, at which point the whole document is
+     * re-typeset rather than left half original and half ours. Said in advance
+     * because it is a real possibility, not a remote one — and it was a
+     * certainty before in-place editing worked.
+     */
     reformatNotice:
       format === "pdf"
-        ? "PDF uploads are re-laid out into a clean standard template on export; the original visual design is not preserved."
+        ? "Your PDF keeps its own design: changes are edited into the file itself. If a change cannot be made to fit the space it replaces, the whole CV is re-typeset into a clean template instead, and you will be told when that happens."
         : null,
   });
 }

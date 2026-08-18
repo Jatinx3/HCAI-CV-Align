@@ -61,6 +61,14 @@ export default function CvPaper({
               </div>
             );
           }
+          if (block.kind === "labelled") {
+            return (
+              <p key={i} className="cv-para">
+                <strong>{block.label}:</strong>{" "}
+                <Marked text={block.text} highlights={highlights} />
+              </p>
+            );
+          }
           if (block.kind === "list") {
             return (
               <ul key={i} className="cv-list">

@@ -123,6 +123,8 @@ function renderBlock(block: CvBlock, d: Density): string {
         ...block.items.map((item) => `\\item ${escapeTexText(item)}`),
         "\\end{itemize}",
       ].join("\n");
+    case "labelled":
+      return `\\vspace{${d.paraGap}}\\textbf{${escapeTexText(block.label)}}: ${escapeTexText(block.text)}\\par`;
     case "paragraph":
       return `\\vspace{${d.paraGap}}${escapeTexText(block.text)}\\par`;
   }

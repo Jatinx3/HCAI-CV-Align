@@ -15,7 +15,7 @@ type UploadResult = {
 const FORMAT_FIDELITY: Record<string, string> = {
   tex: "LaTeX source — your formatting is preserved exactly on export.",
   docx: "Word document — styles are preserved; minor reflow possible on export.",
-  pdf: "PDF — export uses a clean standard layout, not a copy of your design.",
+  pdf: "PDF — changes are edited into your own file, keeping your design; a change that cannot fit falls back to a clean template.",
 };
 
 const PRINCIPLES = [
@@ -114,7 +114,9 @@ export default function UploadForm({
   const [starting, setStarting] = useState(false);
   const [oneClicking, setOneClicking] = useState(false);
   const [oneClickNote, setOneClickNote] = useState<string | null>(null);
-  const [preview, setPreview] = useState<"document" | "text">("document");
+  const [preview, setPreview] = useState<"document" | "text" | "original">(
+    "document",
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function startHumanCentered() {
@@ -283,7 +285,7 @@ export default function UploadForm({
             {", "}
             <span className="whitespace-nowrap">
               <strong className="font-mono text-xs uppercase">pdf</strong> —
-              re-laid out in a clean template
+              edited in place, clean template if a change will not fit
             </span>
             .
           </p>
@@ -452,18 +454,60 @@ export default function UploadForm({
                 >
                   Extracted text
                 </button>
+                {/* A PDF can be shown exactly as it arrived. The parsed view
+                    is still the default, because what the assistant will work
+                    from is the thing worth checking. */}
+                {result.format === "pdf" && (
+                  <button
+                    type="button"
+                    onClick={() => setPreview("original")}
+                    aria-pressed={preview === "original"}
+                    className={`cursor-pointer border px-2.5 py-1 text-xs font-semibold transition-colors duration-150 ${
+                      preview === "original"
+                        ? "border-accent bg-accent-soft text-accent"
+                        : "border-border-strong text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Your file
+                  </button>
+                )}
               </div>
             </div>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               {preview === "document"
                 ? "Your CV as the assistant has understood it. Check the sections and wording look right before continuing."
-                : "The exact text read from your file. If something important is missing, try a different format of your CV."}
+                : preview === "original"
+                  ? "The file you uploaded, unchanged. Accepted changes are edited into this document, so it keeps its own design."
+                  : "The exact text read from your file. If something important is missing, try a different format of your CV."}
             </p>
             {preview === "document" ? (
               <CvPaper
                 text={result.extractedText}
                 className="mt-3 max-h-96 border border-border"
               />
+            ) : preview === "original" ? (
+              // <object> falls back to its children where a browser cannot
+              // render a PDF inline, so the view is never a dead end.
+              <object
+                data={`/api/cv/${result.id}/file`}
+                type="application/pdf"
+                title="Your uploaded CV"
+                className="mt-3 h-96 w-full border border-border bg-[#6b6b66]"
+              >
+                <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Your browser can’t display PDFs inline.
+                  </p>
+                  <a
+                    href={`/api/cv/${result.id}/file`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="h-10 cursor-pointer bg-primary px-5 text-sm font-semibold leading-10 text-on-primary"
+                  >
+                    Open it in a new tab
+                  </a>
+                </div>
+              </object>
             ) : (
               <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap border border-border bg-background p-4 text-[13px] leading-relaxed text-foreground">
                 {result.extractedText}

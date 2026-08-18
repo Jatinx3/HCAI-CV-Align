@@ -742,7 +742,7 @@ export default function ReviewClient({
                 <div className="border-t border-border px-5 py-3">
                   <p className="text-xs leading-relaxed text-faint-foreground">
                     {format === "pdf"
-                      ? "This preview matches the clean template your PDF upload is re-laid out into on export."
+                      ? "A reading preview. On export, accepted changes are edited into your own PDF, so the download keeps its design — unless a change will not fit the space it replaces, in which case the whole CV is re-typeset and you are told."
                       : format === "tex"
                         ? "A reading preview. On export, changes are spliced into your original LaTeX source, so the downloaded PDF keeps your own formatting."
                         : "A reading preview. On export, changes are written back into your original Word file, so the downloaded PDF keeps your own styles."}

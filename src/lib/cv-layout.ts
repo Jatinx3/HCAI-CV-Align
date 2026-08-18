@@ -176,9 +176,18 @@ export function splitEntry(line: string): EntryParts | null {
   const t = line.trim();
   if (!t || BULLET.test(t) || isHeading(t)) return null;
 
-  // Plain templates put no gap between the columns at all; they write a
-  // separator. Split there when what follows reads as a right-hand column.
-  const piped = /^(.+?)\s+[|•·–—]\s+(.+)$/.exec(t);
+  /**
+   * Plain templates put no gap between the columns at all; they write a
+   * separator. Split there when what follows reads as a right-hand column.
+   *
+   * A pipe outranks a dash. Project rows are written "Name – What it is
+   * (link) | Tech, Tech", where the dash belongs to the title and the pipe is
+   * the column boundary, so splitting at the first separator of any kind cut
+   * "RevPilot" away from "Agentic AI Revenue Manager" and left the rest of the
+   * row as body text. Only when there is no pipe does a dash mark a column.
+   */
+  const piped =
+    /^(.+?)\s+[|•·]\s+(.+)$/.exec(t) ?? /^(.+?)\s+[–—]\s+(.+)$/.exec(t);
   if (piped) {
     const [, left, right] = piped;
     if (RIGHT_COLUMN.test(right) || isDateOnly(right)) {
@@ -356,6 +365,9 @@ export function unwrapLines(lines: string[]): string[] {
 export type CvBlock =
   | { kind: "heading"; text: string }
   | { kind: "paragraph"; text: string }
+  /** "Languages: Python, Go" in a skills section — the label is set bold and
+      the values follow it on the same line, as résumés write them. */
+  | { kind: "labelled"; label: string; text: string }
   | { kind: "list"; items: string[] }
   /** A title/date row. `secondary` marks the sub-line of an entry (the
       institution under a degree), which résumé layouts set in italic.
@@ -455,6 +467,8 @@ export function layoutCv(text: string): CvDoc {
   const contact: string[] = [];
   if (headerRight) contact.push(headerRight);
   let seenHeading = false;
+  /** Inside a skills section, where "Label: values" rows carry a bold label. */
+  let inSkills = false;
   let list: string[] | null = null;
 
   const closeList = () => {
@@ -472,6 +486,7 @@ export function layoutCv(text: string): CvDoc {
     if (isHeading(t)) {
       closeList();
       seenHeading = true;
+      inSkills = /skill|competenc|technolog|expertise|proficienc/i.test(t);
       blocks.push({ kind: "heading", text: normaliseHeading(t) });
       continue;
     }
@@ -553,6 +568,25 @@ export function layoutCv(text: string): CvDoc {
           right: pair.right,
           secondary: true,
           stacked: false,
+        });
+        continue;
+      }
+    }
+
+    /**
+     * A skills section is a list of labelled groups, and the label carries the
+     * emphasis: "Languages: Java, Python". Only applied inside a skills
+     * section — "Relevant Coursework:" sits under a degree and is set as plain
+     * body text in every résumé this was checked against, so bolding every
+     * "Label:" line anywhere would add emphasis the author did not use.
+     */
+    if (inSkills) {
+      const labelled = /^([^:]{2,40}):\s+(.+)$/.exec(t);
+      if (labelled && labelled[1].split(/\s+/).length <= 5) {
+        blocks.push({
+          kind: "labelled",
+          label: labelled[1].trim(),
+          text: labelled[2].trim(),
         });
         continue;
       }
