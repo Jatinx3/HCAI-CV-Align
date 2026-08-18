@@ -28,6 +28,14 @@ function isNamedSection(line: string): boolean {
 function isHeading(line: string): boolean {
   const t = line.trim();
   if (!t || t.length > 48 || BULLET.test(t)) return false;
+  /**
+   * A record, not a section. "GPA: 3.6/4" carries no lower-case letter, so the
+   * ALL-CAPS test called it a heading and it was set as one — title-cased to
+   * "Gpa: 3.6/4" with a rule under it, in the middle of an education entry.
+   * Sections are named in words; a line pairing digits with a colon or a slash
+   * is a value.
+   */
+  if (/\d/.test(t) && /[:/]/.test(t)) return false;
   const caps = t === t.toUpperCase() && /[A-Z]/.test(t);
   if (caps || KNOWN_HEADING.test(t)) return true;
 

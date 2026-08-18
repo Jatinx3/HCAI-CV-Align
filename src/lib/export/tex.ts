@@ -138,17 +138,74 @@ export async function pdfPageCount(pdf: Buffer): Promise<number> {
   return parsed.numpages;
 }
 
+/** A compile that failed, with the TeX error rather than the shell command. */
+export class TexCompileError extends Error {}
+
+/**
+ * Shims for pdfTeX primitives that XeTeX does not have.
+ *
+ * Tectonic runs XeTeX. Widely-used résumé templates — the Jake's-resume family
+ * among them — are written for pdfTeX and open with
+ *
+ *     \input{glyphtounicode}
+ *     \pdfgentounicode=1
+ *
+ * which improves text extraction under pdfTeX and is an undefined control
+ * sequence under XeTeX, so the compile halts before a single line is set. The
+ * author's own PDF proves the source is valid; it was simply built by a
+ * different engine. Defining the primitives as no-ops lets the document
+ * compile unchanged, and costs only the glyph map, which XeTeX writes itself.
+ *
+ * Inserted after \documentclass so the definitions exist before the preamble
+ * uses them, and only when the source does not already define them.
+ */
+const XETEX_SHIM = String.raw`
+\makeatletter
+\ifdefined\pdfglyphtounicode\else\long\def\pdfglyphtounicode#1#2{}\fi
+\ifdefined\pdfgentounicode\else\newcount\pdfgentounicode\fi
+\ifdefined\pdfsuppresswarningpagegroup\else\newcount\pdfsuppresswarningpagegroup\fi
+\makeatother
+`;
+
+function withXetexShim(source: string): string {
+  if (!/\\pdfgentounicode|\\pdfglyphtounicode|glyphtounicode/.test(source)) {
+    return source;
+  }
+  const documentclass = /\\documentclass[^\n]*\n/.exec(source);
+  if (!documentclass) return `${XETEX_SHIM}\n${source}`;
+  const at = documentclass.index + documentclass[0].length;
+  return source.slice(0, at) + XETEX_SHIM + source.slice(at);
+}
+
+/** The first real TeX error in a log, rather than the whole transcript. */
+function texErrorLine(output: string): string | null {
+  const line = output
+    .split("\n")
+    .find((l) => /^!|error:/i.test(l) && !/^error: halted/i.test(l));
+  return line ? line.replace(/^!\s*/, "").trim().slice(0, 160) : null;
+}
+
 /** Compile a .tex source with Tectonic; returns the PDF bytes. */
 export async function compileTex(source: string): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), "cvtex-"));
   try {
     const texPath = join(dir, "cv.tex");
-    await writeFile(texPath, source, "utf-8");
-    await execFileAsync(
-      "tectonic",
-      ["--outdir", dir, "--chatter", "minimal", texPath],
-      { timeout: 180_000 },
-    );
+    await writeFile(texPath, withXetexShim(source), "utf-8");
+    try {
+      await execFileAsync(
+        "tectonic",
+        ["--outdir", dir, "--chatter", "minimal", texPath],
+        { timeout: 180_000 },
+      );
+    } catch (err) {
+      // The raw failure is "Command failed: tectonic --outdir /var/folders/…",
+      // which tells the person nothing about their document.
+      const detail =
+        texErrorLine(
+          `${(err as { stderr?: string }).stderr ?? ""}\n${(err as { stdout?: string }).stdout ?? ""}`,
+        ) ?? (err as Error).message.slice(0, 160);
+      throw new TexCompileError(`LaTeX could not compile your CV: ${detail}`);
+    }
     return await readFile(join(dir, "cv.pdf"));
   } finally {
     await rm(dir, { recursive: true, force: true });
