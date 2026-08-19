@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { recordEvent } from "@/lib/telemetry";
 import { exportCv, type SpanReplacement } from "@/lib/export";
 import type { CvFormat } from "@/lib/extract";
 
@@ -71,6 +72,24 @@ export async function POST(request: Request) {
           ...(typeof body.conservatism === "number"
             ? { conservatism: body.conservatism }
             : {}),
+        },
+      });
+
+      const step = await prisma.modeStep.findFirst({
+        where: { id: body.stepId, userId: user.id },
+        select: { id: true, studySessionId: true },
+      });
+      await recordEvent({
+        userId: user.id,
+        type: "mode_completed",
+        modeStepId: step?.id ?? null,
+        studySessionId: step?.studySessionId ?? null,
+        payload: {
+          mode: "HUMAN_CENTERED",
+          accepted: body.replacements?.length ?? 0,
+          reformatted: result.reformatted,
+          unplaced: result.unplaced.length,
+          conservatism: body.conservatism ?? null,
         },
       });
     }

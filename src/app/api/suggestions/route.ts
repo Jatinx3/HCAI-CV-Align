@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { recordEvent } from "@/lib/telemetry";
 import { parseSections, rewritableSections } from "@/lib/sections";
 import {
   buildSystemPrompt,
@@ -36,14 +37,20 @@ export async function POST(request: Request) {
   }
   const user = authed.user;
 
-  let body: { cvId?: string; jdText?: string; conservatism?: number };
+  let body: {
+    cvId?: string;
+    jdText?: string;
+    conservatism?: number;
+    /** The step these suggestions belong to, so the run can be logged against it. */
+    stepId?: string;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { cvId, jdText, conservatism } = body;
+  const { cvId, jdText, conservatism, stepId } = body;
   if (!cvId) {
     return NextResponse.json({ error: "cvId is required" }, { status: 400 });
   }
@@ -90,6 +97,7 @@ export async function POST(request: Request) {
       };
 
       let droppedInvalid = 0;
+      let shownCount = 0;
       const failures: { sectionId: string; reason: string }[] = [];
 
       send({
@@ -123,6 +131,7 @@ export async function POST(request: Request) {
           const outcome = validateSuggestions(parsed, section);
           const gaps = validateGaps(parsed, section);
           droppedInvalid += outcome.rejected.length;
+          shownCount += outcome.suggestions.length;
 
           send({
             type: "section",
@@ -151,6 +160,19 @@ export async function POST(request: Request) {
       }
 
       send({ type: "done", model, droppedInvalid, failures });
+      await recordEvent({
+        userId: user.id,
+        type: "suggestions_generated",
+        modeStepId: stepId ?? null,
+        payload: {
+          model,
+          conservatism,
+          sections: targets.length,
+          shown: shownCount,
+          droppedInvalid,
+          failedSections: failures.length,
+        },
+      });
       controller.close();
     },
   });

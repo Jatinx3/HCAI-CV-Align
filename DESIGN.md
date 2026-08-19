@@ -157,7 +157,14 @@ Work in phases; commit at end of each; pause for confirmation before the next.
    backup for the external form (`STUDY_FEEDBACK_FORM_URL`). The three principle cards
    are hidden on the one-click step: they describe the prototype's values, and showing
    them to a participant about to use the baseline would sell what the baseline lacks.
-8. Telemetry
+8. Telemetry ✅
+   Events carry identifiers, counts and timings — never CV or JD text, which already
+   lives on the mode step. The type comes from a fixed list, and the browser may only
+   report the seven that are participant actions; the rest are established server-side.
+   A failed write is swallowed: a participant's accepted change must not be lost because
+   a log write was. `timeToFirstActionMs` is set once, from the first accept/reject/edit,
+   and is coarse by construction — a step left open inflates it, so filter on it rather
+   than trusting it.
 9. Polish (empty states, error handling, readable diffs — no feature creep)
 
 ## Commands

@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { studyStepData } from "@/lib/study";
+import { recordEvent } from "@/lib/telemetry";
 import { exportCv } from "@/lib/export";
 import type { CvFormat } from "@/lib/extract";
+import { assembleCv, parseSections, rewritableSections } from "@/lib/sections";
 import {
   buildOneClickSystemPrompt,
   buildOneClickUserPrompt,
@@ -67,15 +69,42 @@ export async function POST(request: Request) {
     },
   });
 
+  await recordEvent({
+    userId: user.id,
+    type: "mode_started",
+    modeStepId: step.id,
+    studySessionId: step.studySessionId,
+    payload: { mode: "ONE_CLICK", format: doc.format, jdChars: jdText.length },
+  });
+
+  /**
+   * The contact block never goes to the model.
+   *
+   * The review mode has always excluded it, and the baseline sending the whole
+   * document was an accident of being one call rather than a design decision.
+   * It is not a hypothetical difference: asked to rewrite the document, the
+   * model changed the applicant's email address to one that was not theirs,
+   * which the applicant would have had no opportunity to notice. Thinness in
+   * the baseline is about what it lets the user decide, not about exposing
+   * their contact details to a rewrite.
+   */
+  const sections = parseSections(doc.extractedText);
+  const header = sections.find((s) => s.kind === "header");
+  const cvBody = assembleCv(rewritableSections(sections));
+
   let rewritten: string;
   try {
-    rewritten = await complete({
+    const rewrittenBody = await complete({
       system: buildOneClickSystemPrompt(),
-      user: buildOneClickUserPrompt(doc.extractedText, jdText),
+      user: buildOneClickUserPrompt(cvBody, jdText),
       // A whole CV in one request, against a free-tier model. The route allows
       // 300s; leave headroom so the export still has time to run.
       timeoutMs: 240_000,
     });
+    // The applicant's own contact block goes back exactly as they wrote it.
+    rewritten = header?.text.trim()
+      ? `${header.text.trim()}\n\n${rewrittenBody.trim()}`
+      : rewrittenBody;
   } catch (err) {
     if (err instanceof LlmConfigError) {
       return NextResponse.json({ error: err.message }, { status: 503 });
@@ -106,6 +135,17 @@ export async function POST(request: Request) {
     await prisma.modeStep.update({
       where: { id: step.id },
       data: { endedAt: new Date(), finalCvText: rewritten },
+    });
+    await recordEvent({
+      userId: user.id,
+      type: "mode_completed",
+      modeStepId: step.id,
+      studySessionId: step.studySessionId,
+      payload: {
+        mode: "ONE_CLICK",
+        reformatted: result.reformatted,
+        unplaced: result.unplaced.length,
+      },
     });
 
     const baseName = doc.fileName.replace(/\.[^.]+$/, "");

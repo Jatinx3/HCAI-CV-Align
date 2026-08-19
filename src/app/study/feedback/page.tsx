@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { studyState, MODE_LABEL, modeForStep } from "@/lib/study";
+import { recordEvent } from "@/lib/telemetry";
 import PreferenceForm from "./preference-form";
 
 /**
@@ -36,6 +37,12 @@ export default async function FeedbackPage() {
     await prisma.studySession.update({
       where: { id: state.sessionId },
       data: { feedbackHandoffReachedAt: new Date() },
+    });
+    await recordEvent({
+      userId: session.user.id,
+      type: "handoff_reached",
+      studySessionId: state.sessionId,
+      payload: { order: state.order, formConfigured: Boolean(process.env.STUDY_FEEDBACK_FORM_URL) },
     });
   }
 

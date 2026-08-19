@@ -121,6 +121,23 @@ export default function ReviewClient({
     [workingSections],
   );
 
+  /**
+   * Report what the participant did, without making them wait for it. Fire and
+   * forget on purpose: a decision must never be delayed, or lost, because the
+   * research log was slow or unreachable.
+   */
+  const track = useCallback(
+    (type: string, payload?: Record<string, string | number | boolean>) => {
+      void fetch("/api/telemetry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stepId, type, payload }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+    [stepId],
+  );
+
   const decisionOf = useCallback(
     (id: string): Decision =>
       applied.some((e) => e.suggestionId === id)
@@ -150,6 +167,12 @@ export default function ReviewClient({
   const pendingCount = suggestions.length - acceptedCount - rejectedCount;
 
   function accept(s: Suggestion, text?: string) {
+    const edited = text !== undefined && text !== s.suggested;
+    track(edited ? "suggestion_edited" : "suggestion_accepted", {
+      suggestionId: s.id,
+      sectionId: s.sectionId,
+      conservatism,
+    });
     setRejected((prev) => {
       const next = new Set(prev);
       next.delete(s.id);
@@ -170,11 +193,17 @@ export default function ReviewClient({
   }
 
   function reject(s: Suggestion) {
+    track("suggestion_rejected", {
+      suggestionId: s.id,
+      sectionId: s.sectionId,
+      conservatism,
+    });
     setApplied((prev) => prev.filter((e) => e.suggestionId !== s.id));
     setRejected((prev) => new Set(prev).add(s.id));
   }
 
   function undo(s: Suggestion) {
+    track("suggestion_undone", { suggestionId: s.id, sectionId: s.sectionId });
     setApplied((prev) => prev.filter((e) => e.suggestionId !== s.id));
     setRejected((prev) => {
       const next = new Set(prev);
@@ -184,6 +213,9 @@ export default function ReviewClient({
   }
 
   function showInJd(requirement: string) {
+    // Which requirements a participant checked against the job description is
+    // the closest behavioural reading of whether the citation was used.
+    track("jd_requirement_opened", { length: requirement.length });
     setJdFocus(requirement);
     setRail("jd");
   }
@@ -211,7 +243,7 @@ export default function ReviewClient({
       const res = await fetch("/api/suggestions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cvId, jdText, conservatism }),
+        body: JSON.stringify({ cvId, jdText, conservatism, stepId }),
       });
 
       if (!res.ok) {
@@ -434,9 +466,11 @@ export default function ReviewClient({
                 step={1}
                 value={conservatism}
                 disabled={running}
-                onChange={(e) =>
-                  setConservatism(Number(e.target.value) as ConservatismLevel)
-                }
+                onChange={(e) => {
+                  const level = Number(e.target.value) as ConservatismLevel;
+                  track("conservatism_changed", { level });
+                  setConservatism(level);
+                }}
                 className="mt-3 w-full accent-[var(--accent)] disabled:opacity-50"
                 aria-describedby="conservatism-hint"
               />
@@ -619,6 +653,12 @@ export default function ReviewClient({
                     editingText={editing[s.id]}
                     unappliable={unappliable(s)}
                     onShowInJd={() => showInJd(s.jdRequirement)}
+                    onRevealOriginal={() =>
+                      track("original_revealed", {
+                        suggestionId: s.id,
+                        sectionId: s.sectionId,
+                      })
+                    }
                     onStartEdit={() =>
                       setEditing((p) => ({
                         ...p,
@@ -1052,6 +1092,7 @@ function SuggestionCard({
   editingText,
   unappliable,
   onShowInJd,
+  onRevealOriginal,
   onStartEdit,
   onEditChange,
   onCancelEdit,
@@ -1066,6 +1107,7 @@ function SuggestionCard({
   editingText?: string;
   unappliable: boolean;
   onShowInJd: () => void;
+  onRevealOriginal: () => void;
   onStartEdit: () => void;
   onEditChange: (v: string) => void;
   onCancelEdit: () => void;
@@ -1160,7 +1202,15 @@ function SuggestionCard({
         </div>
       </div>
 
-      <details className="mt-3">
+      {/* The one disclosure on this card. Explanations and cited requirements
+          are always visible, so this is the only place where "did they look?"
+          is a question the interface can answer. */}
+      <details
+        className="mt-3"
+        onToggle={(e) => {
+          if ((e.currentTarget as HTMLDetailsElement).open) onRevealOriginal();
+        }}
+      >
         <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">
           Show your original wording
         </summary>

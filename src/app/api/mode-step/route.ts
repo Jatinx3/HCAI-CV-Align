@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { studyStepData } from "@/lib/study";
+import { recordEvent } from "@/lib/telemetry";
 
 export const runtime = "nodejs";
 
@@ -64,6 +65,14 @@ export async function POST(request: Request) {
       jdText,
       ...(study.data ?? {}),
     },
+  });
+
+  await recordEvent({
+    userId: user.id,
+    type: "mode_started",
+    modeStepId: step.id,
+    studySessionId: step.studySessionId,
+    payload: { mode, format: doc.format, jdChars: jdText.length },
   });
 
   return NextResponse.json({ id: step.id });
