@@ -1,34 +1,50 @@
 import "server-only";
 import { prisma } from "./prisma";
-import { MODE_LABEL, modeForStep, type StudyMode, type StudyOrder } from "./study-shared";
-
-/**
- * The guided within-subjects session.
- *
- * A participant meets both rewrite modes in one sitting, in an order the
- * server assigns, and finishes at a single comparative feedback handoff. The
- * order is the experimental control: whoever sees per-suggestion review first
- * may judge the baseline more harshly afterwards, so the design cannot remove
- * that carry-over, only balance it and record which way round each participant
- * met the two systems.
- *
- * Every decision here is made server-side. The client is told which mode it is
- * on, never asked, because a participant who could pick their own order would
- * make the counterbalancing meaningless.
- */
+import type { StudyMode, StudyOrder } from "./study-shared";
 
 export { MODE_LABEL, modeForStep } from "./study-shared";
 export type { StudyMode, StudyOrder } from "./study-shared";
 
 /**
- * Assign the order that is currently behind.
+ * The guided session.
  *
- * Alternating strictly would let a participant infer the next assignment, and
- * randomising alone drifts at this sample size — 20 to 30 people can easily
- * split 18/7. Counting first and taking the minority keeps the two arms level;
- * ties are broken at random so the sequence is not predictable.
+ * A participant uses both rewrite modes before giving comparative feedback,
+ * chooses which to try first, and may run either of them as many times as they
+ * want before finishing. The guidance is in the destination — both modes, then
+ * one comparison — not in the route taken to it.
+ *
+ * The order is therefore observed rather than manipulated. The server still
+ * computes a balanced suggestion when the session opens, and records it, so the
+ * analysis can report what was suggested alongside what was chosen and say
+ * whether the two arms ended up level. What it no longer does is refuse a mode.
  */
-export async function assignOrder(): Promise<StudyOrder> {
+
+export type ModeProgress = Record<StudyMode, number>;
+
+export type StudyState = {
+  sessionId: string;
+  /** The balanced order the app suggested. Not enforced. */
+  suggestedOrder: StudyOrder;
+  /** Completed runs of each mode. Either may be more than one. */
+  completed: ModeProgress;
+  /** The mode the participant finished first, once one is finished. */
+  observedFirst: StudyMode | null;
+  /** A step started and not finished, to resume rather than start again. */
+  resumeStepId: string | null;
+  /** Both modes used at least once: the comparison can be made. */
+  canFinish: boolean;
+  /** The participant has been sent to the feedback form. */
+  handoffReached: boolean;
+};
+
+/**
+ * Suggest the order that is currently behind.
+ *
+ * Kept even though participants choose for themselves: it costs nothing, it
+ * keeps the two arms roughly level when people take the suggestion, and the
+ * count is what tells the researcher whether the sample has drifted.
+ */
+export async function suggestOrder(): Promise<StudyOrder> {
   const [oneClickFirst, humanFirst] = await Promise.all([
     prisma.studySession.count({ where: { assignedOrder: "ONE_CLICK_FIRST" } }),
     prisma.studySession.count({
@@ -40,69 +56,49 @@ export async function assignOrder(): Promise<StudyOrder> {
   return Math.random() < 0.5 ? "ONE_CLICK_FIRST" : "HUMAN_CENTERED_FIRST";
 }
 
-export type StudyState = {
-  sessionId: string;
-  order: StudyOrder;
-  /** Which of the two steps the participant is on, 1 or 2. */
-  stepIndex: 1 | 2;
-  mode: StudyMode;
-  /** An unfinished step to resume rather than start again. */
-  resumeStepId: string | null;
-  /** Both modes done: the participant belongs at the feedback handoff. */
-  finished: boolean;
-};
-
-/**
- * The participant's current position, creating the session on first arrival.
- *
- * A step counts as done when its ModeStep has an end time, which both modes
- * set when the participant exports a finished CV. A step that was started and
- * abandoned is resumed rather than duplicated, so a browser reload in the
- * middle of a task does not cost the work or corrupt the record.
- */
 export async function studyState(userId: string): Promise<StudyState> {
   let session = await prisma.studySession.findFirst({
     where: { userId, completedAt: null },
     orderBy: { startedAt: "desc" },
-    include: { modeSteps: true },
+    include: { modeSteps: { orderBy: { startedAt: "asc" } } },
   });
 
   if (!session) {
     const created = await prisma.studySession.create({
-      data: { userId, assignedOrder: await assignOrder() },
+      data: { userId, assignedOrder: await suggestOrder() },
     });
     session = { ...created, modeSteps: [] };
   }
 
-  const order = session.assignedOrder as StudyOrder;
-  const stepFor = (index: number) =>
-    session.modeSteps.find((s) => s.stepIndex === index);
-
-  const first = stepFor(1);
-  const second = stepFor(2);
-
-  const stepIndex: 1 | 2 = first?.endedAt ? 2 : 1;
-  const current = stepIndex === 1 ? first : second;
+  const done = session.modeSteps.filter((s) => s.endedAt);
+  const completed: ModeProgress = {
+    ONE_CLICK: done.filter((s) => s.mode === "ONE_CLICK").length,
+    HUMAN_CENTERED: done.filter((s) => s.mode === "HUMAN_CENTERED").length,
+  };
+  const unfinished = session.modeSteps.find((s) => !s.endedAt);
 
   return {
     sessionId: session.id,
-    order,
-    stepIndex,
-    mode: modeForStep(order, stepIndex),
-    resumeStepId: current && !current.endedAt ? current.id : null,
-    finished: Boolean(first?.endedAt && second?.endedAt),
+    suggestedOrder: session.assignedOrder as StudyOrder,
+    completed,
+    observedFirst: (done[0]?.mode as StudyMode) ?? null,
+    resumeStepId: unfinished?.id ?? null,
+    canFinish: completed.ONE_CLICK > 0 && completed.HUMAN_CENTERED > 0,
+    handoffReached: session.feedbackHandoffReachedAt !== null,
   };
 }
 
 /**
- * Attach a starting mode step to the guided session, refusing a mode that is
- * not the one assigned for this step. Returns null for a general user, whose
- * steps carry no session and no index.
+ * Attach a starting step to the guided session.
+ *
+ * No mode is refused. The step index is the position in the session, so a
+ * participant who runs the review mode three times leaves three numbered steps
+ * rather than three indistinguishable ones. Returns null for a general user,
+ * whose steps carry no session and no index.
  */
 export async function studyStepData(
   userId: string,
   studyParticipant: boolean,
-  mode: StudyMode,
 ): Promise<
   | { ok: true; data: { studySessionId: string; stepIndex: number } | null }
   | { ok: false; error: string }
@@ -110,20 +106,11 @@ export async function studyStepData(
   if (!studyParticipant) return { ok: true, data: null };
 
   const state = await studyState(userId);
-  if (state.finished) {
-    return {
-      ok: false,
-      error: "Both parts of this session are complete. Continue to the feedback form.",
-    };
-  }
-  if (mode !== state.mode) {
-    return {
-      ok: false,
-      error: `This session is on ${MODE_LABEL[state.mode]} for step ${state.stepIndex}.`,
-    };
-  }
+  const taken = await prisma.modeStep.count({
+    where: { studySessionId: state.sessionId },
+  });
   return {
     ok: true,
-    data: { studySessionId: state.sessionId, stepIndex: state.stepIndex },
+    data: { studySessionId: state.sessionId, stepIndex: taken + 1 },
   };
 }

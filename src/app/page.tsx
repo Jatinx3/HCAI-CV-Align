@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { auth, signOut } from "@/lib/auth";
 import { studyState } from "@/lib/study";
 import UploadForm from "./upload-form";
@@ -8,16 +7,16 @@ export default async function Home() {
   const session = await auth();
 
   /**
-   * A study participant is walked through both modes in a fixed, assigned
-   * order; a general user chooses freely. The session is created on first
-   * arrival, so the order is fixed before any work is done rather than after
-   * the participant has seen one of the systems.
+   * A study participant is shown where they are in the session and decides
+   * what to do next; a general user sees none of it. The session opens on
+   * first arrival so a suggested order exists before any work is done, and
+   * nothing here redirects: being sent to the comparison the moment the second
+   * mode finishes would take away the "run it again" the session promises.
    */
   const study =
     session?.user?.studyParticipant && session.user.id
       ? await studyState(session.user.id)
       : null;
-  if (study?.finished) redirect("/study/feedback");
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -68,12 +67,13 @@ export default async function Home() {
         </div>
         {study && (
           <StudyBanner
-            stepIndex={study.stepIndex}
-            mode={study.mode}
+            completed={study.completed}
+            suggestedOrder={study.suggestedOrder}
+            canFinish={study.canFinish}
             resumeStepId={study.resumeStepId}
           />
         )}
-        <UploadForm guidedMode={study?.mode} />
+        <UploadForm studyParticipant={Boolean(study)} />
       </main>
 
       <footer className="border-t border-border">

@@ -54,16 +54,34 @@ async function main() {
     orderBy: { startedAt: "asc" },
   });
 
-  const sessionRows = sessions.map((s) => ({
+  const sessionRows = sessions.map((s) => {
+    const done = s.modeSteps.filter((m) => m.endedAt);
+    const oneClickRuns = done.filter((m) => m.mode === "ONE_CLICK").length;
+    const reviewRuns = done.filter((m) => m.mode === "HUMAN_CENTERED").length;
+    return {
     participant_code: participantCode(s.id),
     session_id: s.id,
     account_id: s.userId,
-    assigned_order: s.assignedOrder,
+    suggested_order: s.assignedOrder,
+    // What the participant actually did. Order is self-selected, so this is an
+    // observed variable rather than a manipulated one, and the analysis has to
+    // treat it that way.
+    chosen_first: done[0]?.mode ?? "",
+    took_suggestion:
+      done.length === 0
+        ? ""
+        : (s.assignedOrder === "ONE_CLICK_FIRST") ===
+            (done[0].mode === "ONE_CLICK")
+          ? 1
+          : 0,
+    one_click_runs: oneClickRuns,
+    review_runs: reviewRuns,
     started_at: iso(s.startedAt),
     handoff_reached_at: iso(s.feedbackHandoffReachedAt),
     local_preference: s.localPreference,
-    steps_completed: s.modeSteps.filter((m) => m.endedAt).length,
-  }));
+    steps_completed: done.length,
+    };
+  });
 
   const stepRows = sessions.flatMap((s) =>
     s.modeSteps.map((m) => ({
@@ -108,12 +126,20 @@ async function main() {
   console.log(`  steps.csv     ${stepRows.length} mode steps`);
   console.log(`  events.csv    ${eventRows.length} events`);
   if (sessionRows.length) {
-    const oneClickFirst = sessionRows.filter(
-      (r) => r.assigned_order === "ONE_CLICK_FIRST",
+    const started = sessionRows.filter((r) => r.chosen_first);
+    const choseOneClick = started.filter(
+      (r) => r.chosen_first === "ONE_CLICK",
     ).length;
     console.log(
-      `\nCounterbalancing: ${oneClickFirst} one-click first, ${sessionRows.length - oneClickFirst} human-centered first`,
+      `\nChosen first: ${choseOneClick} one-click, ${started.length - choseOneClick} review each change` +
+        ` (of ${started.length} who started)`,
     );
+    const took = started.filter((r) => r.took_suggestion === 1).length;
+    console.log(`Took the suggested order: ${took}/${started.length}`);
+    const repeats = sessionRows.filter(
+      (r) => r.one_click_runs > 1 || r.review_runs > 1,
+    ).length;
+    console.log(`Ran a mode more than once: ${repeats}`);
     const reached = sessionRows.filter((r) => r.handoff_reached_at).length;
     console.log(`Reached the feedback handoff: ${reached}/${sessionRows.length}`);
   }

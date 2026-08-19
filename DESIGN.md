@@ -29,15 +29,26 @@ The `Stuff/` directory is an unrelated prior project — never touch it.
 - Each account has boolean `studyParticipant`.
 - General user (`false`): free choice of either mode, no guided flow.
 - Study participant (`true`): guided session —
-  1. On session start, app assigns counterbalanced mode order (one-click first or
-     human-centered first) and records it. Balance assignment across participants
-     (alternate or randomise while tracking counts) so neither order dominates.
-  2. Participant completes first assigned mode, then the second.
+  1. On session start the app computes a balanced **suggested** order and records it,
+     but does not enforce it. The participant chooses which mode to try first, and may
+     run either mode as many times as they want. The session is guided by its
+     destination — both modes, then one comparison — not by its route.
+  2. The comparison opens once each mode has been completed at least once. Nothing
+     redirects there automatically: being pushed to the form the moment the second
+     mode finishes would remove the "try it again" the session offers.
   3. Single comparative feedback handoff: app directs participant to ONE external
      Microsoft Forms form (preference, comparative judgements on trust / perceived
      control / transparency / authenticity, free-text reason). App does NOT reproduce
      the form; it logs that the handoff was reached. Optionally record forced-choice
-     preference locally as backup.
+     preference locally as backup. The handoff shows a six-character participant code
+     derived from the session id — the join key between form responses and the app's
+     records — or substitutes it into a pre-filled form URL containing `{code}`.
+- **Order is observed, not manipulated.** Because participants choose, order correlates
+  with whatever made them choose, and carry-over cannot be separated from preference.
+  `npm run export-study` reports `suggested_order`, `chosen_first`, `took_suggestion`
+  and the per-mode run counts so the analysis can state this rather than assume it away.
+  This is a deliberate departure from counterbalancing, made for participant control;
+  it has to be declared as a limitation.
 - Record per mode step: which CV and which JD were used (do NOT assume the same JD is
   reused across both modes — same-CV/two-JDs vs wash-out is the researcher's decision),
   order, mode, timestamps.
@@ -91,7 +102,6 @@ Both modes export through the same per-format pipeline.
   stopping at the first that fits the page count of the uploaded file — a one-page CV
   must not come back two pages long after two accepted edits. A CV that is genuinely
   longer keeps the extra page rather than being crushed to fit.
-  In-place editing was investigated and rejected on evidence — see below.
 
 ## Tech stack (decided)
 

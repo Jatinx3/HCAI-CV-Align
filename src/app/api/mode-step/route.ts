@@ -50,7 +50,7 @@ export async function POST(request: Request) {
 
   // For a study participant the step belongs to the guided session and must be
   // the mode assigned for it; the assignment is not the participant's to make.
-  const study = await studyStepData(user.id, user.studyParticipant, mode);
+  const study = await studyStepData(user.id, user.studyParticipant);
   if (!study.ok) {
     return NextResponse.json({ error: study.error }, { status: 409 });
   }

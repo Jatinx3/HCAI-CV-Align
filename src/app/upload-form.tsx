@@ -95,14 +95,13 @@ function IconAlert({ className }: { className?: string }) {
 }
 
 export default function UploadForm({
-  guidedMode,
+  studyParticipant = false,
 }: {
   /**
-   * In a guided study session, the mode assigned for the step the participant
-   * is on. Only that mode is offered: the order is the experimental control
-   * and is not the participant's to choose.
+   * A participant in the guided session. Both modes are offered — the order is
+   * theirs to choose — but the page does not advertise either one.
    */
-  guidedMode?: "ONE_CLICK" | "HUMAN_CENTERED";
+  studyParticipant?: boolean;
 } = {}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -183,9 +182,8 @@ export default function UploadForm({
       a.click();
       URL.revokeObjectURL(url);
       setOneClickNote("Rewritten CV downloaded.");
-      // In a guided session the download is the end of this step, so send the
-      // participant back to the session, which decides what comes next.
-      if (guidedMode) router.refresh();
+      // Refresh so the session banner shows this run against the mode used.
+      if (studyParticipant) router.refresh();
     } catch {
       setError({
         title: "Couldn\u2019t rewrite your CV",
@@ -245,7 +243,7 @@ export default function UploadForm({
           they judged the system that deliberately lacks them. */}
       <section
         aria-label="How this assistant works"
-        className={guidedMode === "ONE_CLICK" ? "hidden" : undefined}
+        className={studyParticipant ? "hidden" : undefined}
       >
         <div className="grid gap-px overflow-hidden border border-border bg-border sm:grid-cols-3">
           {PRINCIPLES.map((item) => (
@@ -516,25 +514,17 @@ export default function UploadForm({
           </div>
 
           <div className="border-t border-border pt-5">
-            <p className="label-caps">
-              {guidedMode ? "This part of the session" : "Choose how to rewrite"}
-            </p>
+            <p className="label-caps">Choose how to rewrite</p>
             {!jdText.trim() && (
               <p className="mt-2 text-sm text-muted-foreground">
                 Paste a job description above to continue.
               </p>
             )}
-            <div
-              className={`mt-3 grid gap-4 ${guidedMode ? "" : "sm:grid-cols-2"}`}
-            >
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
               {/* Human-centered — the prototype. In a guided session only the
                   mode assigned for this step is offered; the participant does
                   not choose the order. */}
-              <div
-                className={`flex-col border border-border p-4 ${
-                  guidedMode === "ONE_CLICK" ? "hidden" : "flex"
-                }`}
-              >
+              <div className="flex flex-col border border-border p-4">
                 <h3 className="font-serif text-lg font-semibold text-foreground">
                   Review each change
                 </h3>
@@ -553,11 +543,7 @@ export default function UploadForm({
               </div>
 
               {/* One-click — the deliberately thin baseline. */}
-              <div
-                className={`flex-col border border-border p-4 ${
-                  guidedMode === "HUMAN_CENTERED" ? "hidden" : "flex"
-                }`}
-              >
+              <div className="flex flex-col border border-border p-4">
                 <h3 className="font-serif text-lg font-semibold text-foreground">
                   One-click rewrite
                 </h3>

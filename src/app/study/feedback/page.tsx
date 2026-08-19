@@ -3,7 +3,7 @@ import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { studyState, MODE_LABEL, modeForStep } from "@/lib/study";
-import { feedbackFormUrl, participantCode } from "@/lib/study-shared";
+import { feedbackFormUrl, participantCode, type StudyMode } from "@/lib/study-shared";
 import { recordEvent } from "@/lib/telemetry";
 import PreferenceForm from "./preference-form";
 
@@ -26,7 +26,9 @@ export default async function FeedbackPage() {
   if (!session.user.studyParticipant) redirect("/");
 
   const state = await studyState(session.user.id);
-  if (!state.finished) redirect("/");
+  // Both modes at least once. A participant who has not compared anything
+  // cannot answer a comparison.
+  if (!state.canFinish) redirect("/");
 
   // Reaching this page is the handoff. Recorded once; a reload does not
   // overwrite the time the participant first got here.
@@ -43,7 +45,7 @@ export default async function FeedbackPage() {
       userId: session.user.id,
       type: "handoff_reached",
       studySessionId: state.sessionId,
-      payload: { order: state.order, formConfigured: Boolean(process.env.STUDY_FEEDBACK_FORM_URL) },
+      payload: { suggestedOrder: state.suggestedOrder, chosenFirst: state.observedFirst ?? "", oneClickRuns: state.completed.ONE_CLICK, reviewRuns: state.completed.HUMAN_CENTERED, formConfigured: Boolean(process.env.STUDY_FEEDBACK_FORM_URL) },
     });
   }
 
@@ -53,8 +55,10 @@ export default async function FeedbackPage() {
     state.sessionId,
   );
   const prefilled = Boolean(process.env.STUDY_FEEDBACK_FORM_URL?.includes("{code}"));
-  const first = modeForStep(state.order, 1);
-  const second = modeForStep(state.order, 2);
+  // What they actually did, not what was suggested.
+  const first = state.observedFirst ?? modeForStep(state.suggestedOrder, 1);
+  const second: StudyMode =
+    first === "ONE_CLICK" ? "HUMAN_CENTERED" : "ONE_CLICK";
 
   return (
     <div className="flex min-h-screen flex-col bg-background">

@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CV not found" }, { status: 404 });
   }
 
-  const study = await studyStepData(user.id, user.studyParticipant, "ONE_CLICK");
+  const study = await studyStepData(user.id, user.studyParticipant);
   if (!study.ok) {
     return NextResponse.json({ error: study.error }, { status: 409 });
   }
