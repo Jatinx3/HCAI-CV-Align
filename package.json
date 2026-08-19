@@ -9,7 +9,8 @@
     "lint": "eslint",
     "provision": "tsx scripts/provision-user.ts",
     "corpus": "tsx scripts/corpus/check.ts",
-    "export-study": "tsx scripts/export-study.ts"
+    "export-study": "tsx scripts/export-study.ts",
+    "provision:batch": "tsx scripts/provision-batch.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
