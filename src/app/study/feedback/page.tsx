@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { studyState, MODE_LABEL, modeForStep } from "@/lib/study";
+import { feedbackFormUrl, participantCode } from "@/lib/study-shared";
 import { recordEvent } from "@/lib/telemetry";
 import PreferenceForm from "./preference-form";
 
@@ -46,7 +47,12 @@ export default async function FeedbackPage() {
     });
   }
 
-  const formUrl = process.env.STUDY_FEEDBACK_FORM_URL;
+  const code = participantCode(state.sessionId);
+  const formUrl = feedbackFormUrl(
+    process.env.STUDY_FEEDBACK_FORM_URL,
+    state.sessionId,
+  );
+  const prefilled = Boolean(process.env.STUDY_FEEDBACK_FORM_URL?.includes("{code}"));
   const first = modeForStep(state.order, 1);
   const second = modeForStep(state.order, 2);
 
@@ -123,6 +129,20 @@ export default async function FeedbackPage() {
             </>
           )}
         </div>
+
+        {!prefilled && (
+          <div className="mt-6 border border-border-strong bg-background p-5">
+            <p className="label-caps">Your participant code</p>
+            <p className="mt-1 font-mono text-2xl font-semibold tracking-[0.2em] text-foreground">
+              {code}
+            </p>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              The form asks for this first. It is what links your answers to the
+              two sessions you have just completed, and it identifies the
+              session rather than you.
+            </p>
+          </div>
+        )}
 
         <PreferenceForm
           sessionId={state.sessionId}

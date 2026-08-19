@@ -45,3 +45,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 scripts/corpus/out/
+study-export/
