@@ -168,6 +168,13 @@ type Match = {
   quads: Quad[];
   lines: SourceLine[];
   page: number;
+  /** A list marker redacted with the run, to be redrawn with its text. */
+  marker?: { x: number; text: string };
+  /**
+   * Where the replaced text began, kept because extending the redaction over
+   * the marker moves the quad's left edge and the text must not follow it.
+   */
+  textStartX?: number;
 };
 
 /** Where a replacement's original text sits, and how it is set. */
@@ -275,6 +282,52 @@ export async function editPdfInPlace(
     };
   }
 
+  /**
+   * Take the list marker with the text it belongs to.
+   *
+   * The replacement is drawn into a content stream appended after the original
+   * one, so anything reading the text layer in stream order meets it at the end
+   * of the document. Leaving the bullet where it was made that visible as an
+   * orphan: a marker with nothing after it, and the sentence itself stranded
+   * below the skills section. Redacting the marker and redrawing it with its
+   * text at least keeps the item whole, so a reader in stream order sees a
+   * complete bullet rather than a broken one.
+   *
+   * Only a marker glyph is taken. Anything else immediately left of the run is
+   * content, and content is not ours to remove.
+   */
+  const pageHeightOf = (index: number) => {
+    const bounds = doc.loadPage(index).getBounds();
+    return Math.abs(bounds[3] - bounds[1]);
+  };
+  const BULLET_GLYPH = /^[•·▪◦‣∙*\-–—]$/;
+  for (const match of matches.values()) {
+    const first = match.quads[0];
+    const left = Math.min(first[0], first[4]);
+    const top = Math.min(first[1], first[5]);
+    const bottom = Math.max(first[1], first[5]);
+    const pageHeight = pageHeightOf(match.page);
+
+    const marker = fragments.find(
+      (f) =>
+        f.page === match.page &&
+        BULLET_GLYPH.test(f.text.trim()) &&
+        Math.abs(pageHeight - f.baseline - (top + bottom) / 2) < 6 &&
+        f.x < left &&
+        left - f.x < 20,
+    );
+    if (marker) {
+      match.marker = { x: marker.x, text: marker.text.trim() };
+      match.textStartX = left;
+      match.quads[0] = [
+        marker.x - 1, first[1],
+        first[2], first[3],
+        marker.x - 1, first[5],
+        first[6], first[7],
+      ] as Quad;
+    }
+  }
+
   // Redact every located run, then flatten the redactions page by page. This
   // removes the glyphs rather than covering them.
   const touchedPages = new Set<number>();
@@ -325,7 +378,9 @@ export async function editPdfInPlace(
     // original run started, later ones at the left edge of the block.
     const left = Math.min(...match.lines.map((l) => l.x0));
     const right = Math.max(...match.lines.map((l) => l.x1));
-    const startX = Math.min(...match.quads[0].filter((_, i) => i % 2 === 0));
+    const startX =
+      match.textStartX ??
+      Math.min(...match.quads[0].filter((_, i) => i % 2 === 0));
     const widths = [right - startX, ...match.lines.slice(1).map(() => right - left)];
     if (widths.length < match.lines.length) widths.push(right - left);
 
@@ -360,9 +415,19 @@ export async function editPdfInPlace(
           Math.abs(f.baseline - fromMupdf) <= 4 &&
           Math.abs(f.x - Math.min(quad[0], quad[4])) <= 14,
       );
+      const baseline = near ? near.baseline : fromMupdf;
+      if (i === 0 && match.marker) {
+        page.drawText(match.marker.text, {
+          x: match.marker.x,
+          y: baseline,
+          size,
+          font,
+          color: rgb(0, 0, 0),
+        });
+      }
       page.drawText(text, {
         x: i === 0 ? startX : left,
-        y: near ? near.baseline : fromMupdf,
+        y: baseline,
         size,
         font,
         color: rgb(0, 0, 0),
