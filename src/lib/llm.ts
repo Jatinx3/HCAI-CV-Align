@@ -22,6 +22,13 @@ export type CompletionRequest = {
    * review mode makes, so the ceiling is set by the caller rather than fixed.
    */
   timeoutMs?: number;
+  /**
+   * Sampling temperature. Left unset for a long time, which meant decoding ran
+   * at whatever default a provider applied — and on a small free model that
+   * default was wide enough for the same section to return two suggestions on
+   * one run and none on the next. A study cannot rest on that.
+   */
+  temperature?: number;
 };
 
 export class LlmConfigError extends Error {}
@@ -59,6 +66,7 @@ async function completeAnthropic({
   system,
   user,
   maxTokens = 16000,
+  temperature,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -76,6 +84,7 @@ async function completeAnthropic({
       output_config: { effort: "medium" },
       system,
       messages: [{ role: "user", content: user }],
+      ...(temperature === undefined ? {} : { temperature }),
     });
 
     if (response.stop_reason === "refusal") {
@@ -112,6 +121,7 @@ async function completeOpenRouter({
   user,
   maxTokens = 16000,
   timeoutMs = 180_000,
+  temperature,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -133,6 +143,7 @@ async function completeOpenRouter({
       body: JSON.stringify({
         model: activeModel(),
         max_tokens: maxTokens,
+        ...(temperature === undefined ? {} : { temperature }),
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
