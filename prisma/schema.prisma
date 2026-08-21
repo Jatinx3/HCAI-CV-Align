@@ -73,6 +73,14 @@ model ModeStep {
   cvFormat            String? // "pdf" | "docx" | "tex"
   jdText              String?
   conservatism        Int? // last conservatism level used (human-centered only)
+  // Which model produced this run, as a catalogue id from src/lib/models.ts
+  // ("sonnet-5", "gemini-flash", …) rather than a provider string, so a
+  // catalogue edit cannot silently re-label runs that already happened.
+  model               String?
+  // Set the moment a model call for this step first succeeds. A metered tier is
+  // charged against this, not against the step's existence: a run that failed
+  // or was abandoned before the model answered costs the participant nothing.
+  modelRunAt          DateTime?
   startedAt           DateTime  @default(now())
   endedAt             DateTime?
   timeToFirstActionMs Int?

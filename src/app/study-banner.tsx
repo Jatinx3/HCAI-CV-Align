@@ -4,20 +4,22 @@ import { MODE_LABEL, type StudyMode, type StudyOrder, modeForStep } from "@/lib/
 /**
  * Where the participant is in the guided session.
  *
- * The session is guided by its destination rather than its route: both modes,
- * then one comparison. Which to try first is the participant's choice, either
- * may be run again, and the comparison opens once each has been used at least
- * once. Stating that plainly is also what makes the choice real — somebody who
- * does not know a second system is coming cannot sensibly decide which to meet
- * first.
+ * The session is guided by its destination rather than its route: both modes on
+ * the reserved model, then one comparison. Which to try first is the
+ * participant's choice, either may be run again on the unlimited models, and
+ * the comparison opens once each has had its reserved run. Stating that plainly
+ * is also what makes the choice real — somebody who does not know a second
+ * system is coming cannot sensibly decide which to meet first.
  */
 export default function StudyBanner({
   completed,
+  reserved,
   suggestedOrder,
   canFinish,
   resumeStepId,
 }: {
   completed: Record<StudyMode, number>;
+  reserved: Record<StudyMode, number>;
   suggestedOrder: StudyOrder;
   canFinish: boolean;
   resumeStepId: string | null;
@@ -26,9 +28,15 @@ export default function StudyBanner({
   const suggested = modeForStep(suggestedOrder, 1);
 
   const runs = (mode: StudyMode) => {
-    const n = completed[mode];
-    if (n === 0) return "not tried yet";
-    return n === 1 ? "used once" : `used ${n} times`;
+    const extra = completed[mode] - reserved[mode];
+    const more = `${extra} ${extra === 1 ? "run" : "runs"}`;
+    if (reserved[mode] > 0) {
+      return extra > 0 ? `reserved run done · ${more} more` : "reserved run done";
+    }
+    // Runs on the other models count as having tried it, but the sentence has
+    // to keep saying what is still outstanding, or somebody reads "tried" and
+    // wonders why the comparison has not opened.
+    return extra > 0 ? `${more} · reserved run still to do` : "not tried yet";
   };
 
   return (
@@ -36,8 +44,9 @@ export default function StudyBanner({
       <p className="label-caps !text-accent">Guided session</p>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
         You will use two systems and then answer a short comparison. Start with
-        whichever you prefer, and run either of them as many times as you like —
-        the comparison opens once you have used both.
+        whichever you prefer. Each has one run on the reserved model — that is
+        the pair the comparison asks about — and you can run either of them
+        again on the unlimited models as often as you like.
       </p>
 
       <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
@@ -48,7 +57,7 @@ export default function StudyBanner({
             </dt>
             <dd
               className={
-                completed[mode] > 0 ? "text-success" : "text-muted-foreground"
+                reserved[mode] > 0 ? "text-success" : "text-muted-foreground"
               }
             >
               {runs(mode)}
@@ -78,8 +87,9 @@ export default function StudyBanner({
       {canFinish && (
         <div className="mt-4 border-t border-accent/30 pt-4">
           <p className="text-sm leading-relaxed text-foreground">
-            You have used both. Try either again if you want to, or go on to the
-            comparison whenever you are ready.
+            You have used both on the reserved model. Try either again on the
+            unlimited models if you want to, or go on to the comparison whenever
+            you are ready.
           </p>
           <Link
             href="/study/feedback"

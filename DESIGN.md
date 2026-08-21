@@ -116,6 +116,15 @@ Both modes export through the same per-format pipeline.
   **anthropic** (Messages API, `ANTHROPIC_API_KEY` + `CLAUDE_MODEL`). Never called
   from the browser; keys never hardcoded or sent to client. Prompts and the JSON
   suggestion contract are provider-agnostic so switching is an env change only.
+- Which model runs is per-request, not per-deployment. `src/lib/models.ts` holds a
+  small catalogue across three tiers, shown to the participant and chosen by them:
+  one **reserved** model (one run of each mode — the pair the analysis reports on),
+  one **standard** model (one run of each mode), and **unlimited** free models for
+  repeat runs. The allowance is enforced server-side in every route that spends a
+  run and is charged on `ModeStep.modelRunAt`, stamped only when a model call
+  actually succeeds, so an abandoned or timed-out attempt costs a participant
+  nothing. `StudyState.canFinish` requires the reserved pair, so nobody gives
+  comparative feedback about two modes they ran on two different models.
 - Doc tooling (system-level): Tectonic (.tex recompile), LibreOffice headless
   (.docx → PDF), pdf-parse/pdfjs (PDF extraction), mammoth (DOCX parsing).
 

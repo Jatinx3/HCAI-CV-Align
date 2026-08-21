@@ -12,12 +12,14 @@ import {
   deriveLineReplacements,
 } from "@/lib/one-click";
 import { complete, LlmConfigError, LlmCallError } from "@/lib/llm";
+import { checkModelAllowed, chargeModelRun } from "@/lib/model-allowance";
+import { DEFAULT_MODEL_ID } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * POST /api/one-click  { cvId, jdText }
+ * POST /api/one-click  { cvId, jdText, modelId }
  *
  * The thin baseline. One model call rewrites the whole CV; the result is
  * exported through the same per-format pipeline as human-centered mode. No
@@ -31,13 +33,13 @@ export async function POST(request: Request) {
   }
   const user = authed.user;
 
-  let body: { cvId?: string; jdText?: string };
+  let body: { cvId?: string; jdText?: string; modelId?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  const { cvId, jdText } = body;
+  const { cvId, jdText, modelId = DEFAULT_MODEL_ID } = body;
   if (!cvId || !jdText?.trim()) {
     return NextResponse.json(
       { error: "cvId and jdText are required." },
@@ -52,6 +54,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "CV not found" }, { status: 404 });
   }
 
+  const allowed = await checkModelAllowed(
+    user.id,
+    modelId,
+    "ONE_CLICK",
+    user.studyParticipant,
+  );
+  if (!allowed.ok) {
+    return NextResponse.json(
+      { error: allowed.error },
+      { status: allowed.status },
+    );
+  }
+
   const study = await studyStepData(user.id, user.studyParticipant);
   if (!study.ok) {
     return NextResponse.json({ error: study.error }, { status: 409 });
@@ -61,6 +76,7 @@ export async function POST(request: Request) {
     data: {
       userId: user.id,
       mode: "ONE_CLICK",
+      model: allowed.model.id,
       cvDocumentId: doc.id,
       cvFileName: doc.fileName,
       cvFormat: doc.format,
@@ -74,7 +90,12 @@ export async function POST(request: Request) {
     type: "mode_started",
     modeStepId: step.id,
     studySessionId: step.studySessionId,
-    payload: { mode: "ONE_CLICK", format: doc.format, jdChars: jdText.length },
+    payload: {
+      mode: "ONE_CLICK",
+      model: allowed.model.id,
+      format: doc.format,
+      jdChars: jdText.length,
+    },
   });
 
   /**
@@ -97,10 +118,15 @@ export async function POST(request: Request) {
     const rewrittenBody = await complete({
       system: buildOneClickSystemPrompt(),
       user: buildOneClickUserPrompt(cvBody, jdText),
+      model: allowed.model.providerModel,
       // A whole CV in one request, against a free-tier model. The route allows
       // 300s; leave headroom so the export still has time to run.
       timeoutMs: 240_000,
     });
+    // The model answered, so the run is spent. Charged before the export, which
+    // can still fail on a hostile PDF — that is our problem, not a second run
+    // the participant should have to pay for out of their allowance.
+    await chargeModelRun(step.id);
     // The applicant's own contact block goes back exactly as they wrote it.
     rewritten = header?.text.trim()
       ? `${header.text.trim()}\n\n${rewrittenBody.trim()}`
@@ -143,6 +169,7 @@ export async function POST(request: Request) {
       studySessionId: step.studySessionId,
       payload: {
         mode: "ONE_CLICK",
+        model: allowed.model.id,
         reformatted: result.reformatted,
         unplaced: result.unplaced.length,
       },

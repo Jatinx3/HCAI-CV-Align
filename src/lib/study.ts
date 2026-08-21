@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "./prisma";
+import { MODEL_CATALOGUE } from "./models";
 import type { StudyMode, StudyOrder } from "./study-shared";
 
 export { MODE_LABEL, modeForStep } from "./study-shared";
@@ -25,17 +26,31 @@ export type StudyState = {
   sessionId: string;
   /** The balanced order the app suggested. Not enforced. */
   suggestedOrder: StudyOrder;
-  /** Completed runs of each mode. Either may be more than one. */
+  /** Completed runs of each mode, on any model. Either may be more than one. */
   completed: ModeProgress;
+  /**
+   * Completed runs of each mode on the reserved model.
+   *
+   * The pair the study actually compares. Repeats on the free models are for
+   * the participant's own exploring and are recorded, but a comparison drawn
+   * between a strong model in one arm and a weak one in the other would measure
+   * the models rather than the two interaction designs.
+   */
+  reserved: ModeProgress;
   /** The mode the participant finished first, once one is finished. */
   observedFirst: StudyMode | null;
   /** A step started and not finished, to resume rather than start again. */
   resumeStepId: string | null;
-  /** Both modes used at least once: the comparison can be made. */
+  /** Both modes run on the reserved model: the comparison can be made. */
   canFinish: boolean;
   /** The participant has been sent to the feedback form. */
   handoffReached: boolean;
 };
+
+/** Catalogue ids of the reserved tier, for the runs the analysis reports on. */
+const RESERVED_MODEL_IDS = new Set(
+  MODEL_CATALOGUE.filter((m) => m.tier === "reserved").map((m) => m.id),
+);
 
 /**
  * Suggest the order that is currently behind.
@@ -71,19 +86,24 @@ export async function studyState(userId: string): Promise<StudyState> {
   }
 
   const done = session.modeSteps.filter((s) => s.endedAt);
-  const completed: ModeProgress = {
-    ONE_CLICK: done.filter((s) => s.mode === "ONE_CLICK").length,
-    HUMAN_CENTERED: done.filter((s) => s.mode === "HUMAN_CENTERED").length,
-  };
+  const count = (steps: typeof done): ModeProgress => ({
+    ONE_CLICK: steps.filter((s) => s.mode === "ONE_CLICK").length,
+    HUMAN_CENTERED: steps.filter((s) => s.mode === "HUMAN_CENTERED").length,
+  });
+  const completed = count(done);
+  const reserved = count(
+    done.filter((s) => s.model !== null && RESERVED_MODEL_IDS.has(s.model)),
+  );
   const unfinished = session.modeSteps.find((s) => !s.endedAt);
 
   return {
     sessionId: session.id,
     suggestedOrder: session.assignedOrder as StudyOrder,
     completed,
+    reserved,
     observedFirst: (done[0]?.mode as StudyMode) ?? null,
     resumeStepId: unfinished?.id ?? null,
-    canFinish: completed.ONE_CLICK > 0 && completed.HUMAN_CENTERED > 0,
+    canFinish: reserved.ONE_CLICK > 0 && reserved.HUMAN_CENTERED > 0,
     handoffReached: session.feedbackHandoffReachedAt !== null,
   };
 }

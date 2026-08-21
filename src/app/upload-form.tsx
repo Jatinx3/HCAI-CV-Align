@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CvPaper from "@/components/cv-paper";
+import ModelPicker, { hasRun } from "@/components/model-picker";
+import { DEFAULT_MODEL_ID, modelById, type ModelAllowance } from "@/lib/models";
 
 type UploadResult = {
   id: string;
@@ -96,14 +98,29 @@ function IconAlert({ className }: { className?: string }) {
 
 export default function UploadForm({
   studyParticipant = false,
+  allowances = [],
 }: {
   /**
    * A participant in the guided session. Both modes are offered — the order is
    * theirs to choose — but the page does not advertise either one.
    */
   studyParticipant?: boolean;
+  /** Runs left per model, computed on the server on each visit. */
+  allowances?: ModelAllowance[];
 } = {}) {
   const router = useRouter();
+  // Start on the reserved model, but not if it is already spent — landing a
+  // returning participant on a choice they cannot use reads as a broken page.
+  const [modelId, setModelId] = useState(() =>
+    hasRun(allowances, DEFAULT_MODEL_ID, "HUMAN_CENTERED") ||
+    hasRun(allowances, DEFAULT_MODEL_ID, "ONE_CLICK")
+      ? DEFAULT_MODEL_ID
+      : (allowances.find(
+          (a) =>
+            a.perMode.HUMAN_CENTERED.remaining !== 0 ||
+            a.perMode.ONE_CLICK.remaining !== 0,
+        )?.modelId ?? DEFAULT_MODEL_ID),
+  );
   const [file, setFile] = useState<File | null>(null);
   const [jdText, setJdText] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -130,6 +147,7 @@ export default function UploadForm({
           cvId: result.id,
           jdText,
           mode: "HUMAN_CENTERED",
+          modelId,
         }),
       });
       const json = await res.json();
@@ -162,7 +180,7 @@ export default function UploadForm({
       const res = await fetch("/api/one-click", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cvId: result.id, jdText }),
+        body: JSON.stringify({ cvId: result.id, jdText, modelId }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -514,6 +532,15 @@ export default function UploadForm({
           </div>
 
           <div className="border-t border-border pt-5">
+            <ModelPicker
+              value={modelId}
+              onChange={setModelId}
+              allowances={allowances}
+              disabled={starting || oneClicking}
+            />
+          </div>
+
+          <div className="border-t border-border pt-5">
             <p className="label-caps">Choose how to rewrite</p>
             {!jdText.trim() && (
               <p className="mt-2 text-sm text-muted-foreground">
@@ -535,11 +562,21 @@ export default function UploadForm({
                 <button
                   type="button"
                   onClick={startHumanCentered}
-                  disabled={starting || !jdText.trim()}
+                  disabled={
+                    starting ||
+                    !jdText.trim() ||
+                    !hasRun(allowances, modelId, "HUMAN_CENTERED")
+                  }
                   className="mt-4 h-11 cursor-pointer bg-primary px-6 font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50"
                 >
                   {starting ? "Opening review…" : "Review suggestions"}
                 </button>
+                {!hasRun(allowances, modelId, "HUMAN_CENTERED") && (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    You have used your {modelById(modelId)?.label} review run.
+                    Pick an unlimited model above to review again.
+                  </p>
+                )}
               </div>
 
               {/* One-click — the deliberately thin baseline. */}
@@ -554,11 +591,21 @@ export default function UploadForm({
                 <button
                   type="button"
                   onClick={runOneClick}
-                  disabled={oneClicking || !jdText.trim()}
+                  disabled={
+                    oneClicking ||
+                    !jdText.trim() ||
+                    !hasRun(allowances, modelId, "ONE_CLICK")
+                  }
                   className="mt-4 h-11 cursor-pointer border border-border-strong px-6 font-semibold text-foreground transition-colors duration-150 hover:bg-background disabled:cursor-default disabled:opacity-50"
                 >
                   {oneClicking ? "Rewriting…" : "Rewrite and download"}
                 </button>
+                {!hasRun(allowances, modelId, "ONE_CLICK") && (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    You have used your {modelById(modelId)?.label} one-click
+                    run. Pick an unlimited model above to run it again.
+                  </p>
+                )}
                 {oneClickNote && (
                   <p
                     className="mt-2 text-sm text-muted-foreground"

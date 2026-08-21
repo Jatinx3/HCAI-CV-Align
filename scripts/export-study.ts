@@ -25,8 +25,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { participantCode } from "../src/lib/study-shared";
+import { MODEL_CATALOGUE } from "../src/lib/models";
 
 const prisma = new PrismaClient();
+
+/**
+ * The tier whose runs the analysis reports on. Repeats on the free models are
+ * exported too — they are evidence about how much people wanted to re-run — but
+ * they are not the pair the comparison is drawn from.
+ */
+const RESERVED = new Set(
+  MODEL_CATALOGUE.filter((m) => m.tier === "reserved").map((m) => m.id),
+);
 
 function csv(rows: Record<string, string | number | null>[]): string {
   if (rows.length === 0) return "";
@@ -58,6 +68,7 @@ async function main() {
     const done = s.modeSteps.filter((m) => m.endedAt);
     const oneClickRuns = done.filter((m) => m.mode === "ONE_CLICK").length;
     const reviewRuns = done.filter((m) => m.mode === "HUMAN_CENTERED").length;
+    const reservedDone = done.filter((m) => m.model && RESERVED.has(m.model));
     return {
     participant_code: participantCode(s.id),
     session_id: s.id,
@@ -76,6 +87,14 @@ async function main() {
           : 0,
     one_click_runs: oneClickRuns,
     review_runs: reviewRuns,
+    // The reserved pair, and how much re-running happened on top of it.
+    reserved_first: reservedDone[0]?.mode ?? "",
+    reserved_pair_complete:
+      reservedDone.some((m) => m.mode === "ONE_CLICK") &&
+      reservedDone.some((m) => m.mode === "HUMAN_CENTERED")
+        ? 1
+        : 0,
+    free_repeat_runs: done.length - reservedDone.length,
     started_at: iso(s.startedAt),
     handoff_reached_at: iso(s.feedbackHandoffReachedAt),
     local_preference: s.localPreference,
@@ -89,6 +108,12 @@ async function main() {
       step_id: m.id,
       step_index: m.stepIndex,
       mode: m.mode,
+      // The analysis has to be able to separate the reserved pair from the
+      // repeats a participant ran on the free models afterwards; without the
+      // model on the row, a session with five runs is five runs of nothing in
+      // particular.
+      model: m.model,
+      model_run_at: iso(m.modelRunAt),
       cv_file: m.cvFileName,
       cv_format: m.cvFormat,
       jd_chars: m.jdText?.length ?? 0,

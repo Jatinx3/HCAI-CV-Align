@@ -32,6 +32,15 @@ export type CompletionRequest = {
    * removed sampling parameters and reject them with a 400.
    */
   temperature?: number;
+  /**
+   * Provider model id for this one call, overriding the environment default.
+   *
+   * The study gives each participant a small allowance across model tiers, so
+   * which model runs is a per-request decision made from the catalogue rather
+   * than a deployment-wide setting. Unset still means "whatever the environment
+   * says", which is what every non-study caller wants.
+   */
+  model?: string;
 };
 
 export class LlmConfigError extends Error {}
@@ -69,6 +78,7 @@ async function completeAnthropic({
   system,
   user,
   maxTokens = 16000,
+  model,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -80,7 +90,7 @@ async function completeAnthropic({
 
   try {
     const response = await client.messages.create({
-      model: activeModel(),
+      model: model ?? activeModel(),
       max_tokens: maxTokens,
       thinking: { type: "adaptive" },
       // Effort governs how much thinking the model spends. High is the default
@@ -131,6 +141,7 @@ async function completeOpenRouter({
   maxTokens = 16000,
   timeoutMs = 180_000,
   temperature,
+  model,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -150,7 +161,7 @@ async function completeOpenRouter({
         "X-Title": "CV-JD Alignment Assistant (MSc research prototype)",
       },
       body: JSON.stringify({
-        model: activeModel(),
+        model: model ?? activeModel(),
         max_tokens: maxTokens,
         ...(temperature === undefined ? {} : { temperature }),
         messages: [
@@ -178,8 +189,12 @@ async function completeOpenRouter({
       throw new LlmCallError("OPENROUTER_API_KEY was rejected. Check the key.");
     }
     if (response.status === 429) {
+      // Usually the upstream provider saturating rather than our account's cap,
+      // and it clears on a different model long before it clears on this one.
+      // Telling someone to "wait and try again" on a model that is busy sends
+      // them back to the same queue.
       throw new LlmCallError(
-        "Rate limited by OpenRouter (free models have low limits). Wait and try again.",
+        "That model is busy right now. Pick a different one from the list and run it again — the unlimited models each queue separately.",
       );
     }
     throw new LlmCallError(

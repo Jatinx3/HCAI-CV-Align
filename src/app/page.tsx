@@ -1,5 +1,6 @@
 import { auth, signOut } from "@/lib/auth";
 import { studyState } from "@/lib/study";
+import { modelAllowances } from "@/lib/model-allowance";
 import UploadForm from "./upload-form";
 import StudyBanner from "./study-banner";
 
@@ -17,6 +18,16 @@ export default async function Home() {
     session?.user?.studyParticipant && session.user.id
       ? await studyState(session.user.id)
       : null;
+
+  /**
+   * What is left of the model allowance, computed on the server on every visit
+   * rather than tracked in the browser. A participant who runs a mode in one
+   * tab and returns in another should see the truth, and the number shown has
+   * to be the same number the route will enforce.
+   */
+  const allowances = session?.user?.id
+    ? await modelAllowances(session.user.id)
+    : [];
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -68,12 +79,16 @@ export default async function Home() {
         {study && (
           <StudyBanner
             completed={study.completed}
+            reserved={study.reserved}
             suggestedOrder={study.suggestedOrder}
             canFinish={study.canFinish}
             resumeStepId={study.resumeStepId}
           />
         )}
-        <UploadForm studyParticipant={Boolean(study)} />
+        <UploadForm
+          studyParticipant={Boolean(study)}
+          allowances={allowances}
+        />
       </main>
 
       <footer className="border-t border-border">

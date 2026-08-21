@@ -12,6 +12,8 @@ import {
   validateSuggestions,
 } from "@/lib/suggestions";
 import { activeModel, complete, LlmConfigError, LlmCallError } from "@/lib/llm";
+import { checkModelAllowed, chargeModelRun } from "@/lib/model-allowance";
+import { modelById, DEFAULT_MODEL_ID } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -86,8 +88,44 @@ export async function POST(request: Request) {
     );
   }
 
+  /**
+   * Which model runs is the step's business, not the browser's.
+   *
+   * The participant picks a model before the step is created, and the choice is
+   * checked against their allowance and written to the step there. Reading it
+   * back from the step means a client that asked for a different one — or asked
+   * again after the allowance ran out — gets the model it was actually granted.
+   */
+  const step = stepId
+    ? await prisma.modeStep.findFirst({ where: { id: stepId, userId: user.id } })
+    : null;
+  const chosen = modelById(step?.model ?? DEFAULT_MODEL_ID);
+
+  if (step && chosen) {
+    const allowed = await checkModelAllowed(
+      user.id,
+      chosen.id,
+      "HUMAN_CENTERED",
+      user.studyParticipant,
+    );
+    // An unspent step keeps its reservation: the charge lands on this step's
+    // own modelRunAt, so a re-generation inside it is never refused by the
+    // count it is itself part of.
+    if (!allowed.ok && step.modelRunAt === null) {
+      return NextResponse.json(
+        { error: allowed.error },
+        { status: allowed.status },
+      );
+    }
+  }
+
   const system = buildSystemPrompt(conservatism);
-  const model = activeModel();
+  // Falls back to the deployment default for anything created before the
+  // catalogue existed, and for a general user running outside the study. The
+  // label is what the participant is shown; the id is what the export joins on.
+  const model = chosen?.label ?? activeModel();
+  const modelId = chosen?.id ?? activeModel();
+  const providerModel = chosen?.providerModel;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -126,7 +164,11 @@ export async function POST(request: Request) {
           const raw = await complete({
             system,
             user: buildUserPrompt(section, jdText),
+            model: providerModel,
           });
+          // The allowance is spent on the first section that answers, not on
+          // opening the screen. A run that dies on section one costs nothing.
+          if (stepId) await chargeModelRun(stepId);
           const parsed = extractJson(raw);
           const outcome = validateSuggestions(parsed, section);
           const gaps = validateGaps(parsed, section);
@@ -165,7 +207,7 @@ export async function POST(request: Request) {
         type: "suggestions_generated",
         modeStepId: stepId ?? null,
         payload: {
-          model,
+          model: modelId,
           conservatism,
           sections: targets.length,
           shown: shownCount,

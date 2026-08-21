@@ -45,7 +45,7 @@ export default async function FeedbackPage() {
       userId: session.user.id,
       type: "handoff_reached",
       studySessionId: state.sessionId,
-      payload: { suggestedOrder: state.suggestedOrder, chosenFirst: state.observedFirst ?? "", oneClickRuns: state.completed.ONE_CLICK, reviewRuns: state.completed.HUMAN_CENTERED, formConfigured: Boolean(process.env.STUDY_FEEDBACK_FORM_URL) },
+      payload: { suggestedOrder: state.suggestedOrder, chosenFirst: state.observedFirst ?? "", oneClickRuns: state.completed.ONE_CLICK, reviewRuns: state.completed.HUMAN_CENTERED, reservedOneClickRuns: state.reserved.ONE_CLICK, reservedReviewRuns: state.reserved.HUMAN_CENTERED, formConfigured: Boolean(process.env.STUDY_FEEDBACK_FORM_URL) },
     });
   }
 
