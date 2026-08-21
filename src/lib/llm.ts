@@ -23,10 +23,13 @@ export type CompletionRequest = {
    */
   timeoutMs?: number;
   /**
-   * Sampling temperature. Left unset for a long time, which meant decoding ran
-   * at whatever default a provider applied — and on a small free model that
-   * default was wide enough for the same section to return two suggestions on
-   * one run and none on the next. A study cannot rest on that.
+   * Sampling temperature, for providers that still accept one.
+   *
+   * Left unset for a long time, which meant decoding ran at whatever default a
+   * provider applied, and on a small free model that default was wide enough
+   * for the same section to return two suggestions on one run and none on the
+   * next. It is honoured on the OpenRouter path only: the current Claude models
+   * removed sampling parameters and reject them with a 400.
    */
   temperature?: number;
 };
@@ -66,7 +69,6 @@ async function completeAnthropic({
   system,
   user,
   maxTokens = 16000,
-  temperature,
 }: CompletionRequest): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -81,10 +83,17 @@ async function completeAnthropic({
       model: activeModel(),
       max_tokens: maxTokens,
       thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
+      // Effort governs how much thinking the model spends. High is the default
+      // and the right setting here: a suggestion has to quote the CV exactly,
+      // name a requirement from the job description, and survive the validator,
+      // and a proposal that fails any of those is discarded before the
+      // participant sees it, so a cheaper answer is often no answer at all.
+      output_config: { effort: "high" },
       system,
       messages: [{ role: "user", content: user }],
-      ...(temperature === undefined ? {} : { temperature }),
+      // No temperature. Sampling parameters were removed on the current Claude
+      // models and are rejected with a 400, so the knob that exists for
+      // OpenRouter deliberately does not reach this path.
     });
 
     if (response.stop_reason === "refusal") {
