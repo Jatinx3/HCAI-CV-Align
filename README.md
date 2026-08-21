@@ -80,5 +80,5 @@ Re-running for an existing email resets the password and participant flag.
 
 - `src/app` — Next.js App Router pages and API routes
 - `prisma/` — schema and SQLite database (from Phase 2)
-- `CLAUDE.md` — full project brief: modes, study design, VSD value mapping, fidelity rules
+- `DESIGN.md` — full project brief: modes, study design, VSD value mapping, fidelity rules
 - `Stuff/` — unrelated prior work, not part of this app
