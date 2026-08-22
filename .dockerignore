@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.claude
+study-export
+credentials*.csv
+prisma/*.db
+prisma/*.db-journal
+scripts/corpus/out
+*.log
+.env
+.env.local

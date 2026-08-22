@@ -1,0 +1,43 @@
+# Render blueprint: one service, one disk, Frankfurt.
+#
+# The disk is the reason this is not a serverless deploy. It holds the SQLite
+# database and Tectonic's LaTeX package cache, both of which have to survive a
+# redeploy.
+services:
+  - type: web
+    name: cv-jd-alignment
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: frankfurt
+    # Standard, not Starter. Starter's 512MB has to hold Next.js, a Tectonic
+    # compile and a LibreOffice conversion at once, and LibreOffice alone can
+    # approach that on a single .docx.
+    plan: standard
+    healthCheckPath: /login
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: file:/data/dev.db
+      - key: TECTONIC_CACHE_DIR
+        value: /data/tectonic-cache
+      - key: AUTH_TRUST_HOST
+        value: "true"
+      # Set in the Render dashboard, never in this file:
+      #   AUTH_SECRET              openssl rand -base64 32
+      #   LLM_PROVIDER             anthropic | openrouter
+      #   ANTHROPIC_API_KEY        (or OPENROUTER_API_KEY)
+      #   CLAUDE_MODEL             (or OPENROUTER_MODEL)
+      #   STUDY_FEEDBACK_FORM_URL  the Microsoft Forms link
+      - key: AUTH_SECRET
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        sync: false
+      - key: STUDY_FEEDBACK_FORM_URL
+        sync: false

@@ -119,9 +119,20 @@ export async function POST(request: Request) {
       system: buildOneClickSystemPrompt(),
       user: buildOneClickUserPrompt(cvBody, jdText),
       model: allowed.model.providerModel,
-      // A whole CV in one request, against a free-tier model. The route allows
-      // 300s; leave headroom so the export still has time to run.
-      timeoutMs: 240_000,
+      /**
+       * A whole CV in one request, and unlike the review mode nothing is sent
+       * back until the model is done, so this request sits silent on the wire
+       * for its whole duration.
+       *
+       * 200s, not 240s. Some hosts cut an idle connection at around four
+       * minutes — Azure App Service does it at 240s on a load balancer that
+       * cannot be reconfigured — and a request killed by the platform reaches
+       * the participant as a bare 502 with nothing explaining it. Stopping
+       * first means they get our own sentence about a slow model instead.
+       * Measured one-click runs finish in 6–30s across the catalogue, so this
+       * ceiling is nowhere near the working path.
+       */
+      timeoutMs: 200_000,
     });
     // The model answered, so the run is spent. Charged before the export, which
     // can still fail on a hostile PDF — that is our problem, not a second run
