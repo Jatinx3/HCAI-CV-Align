@@ -11,12 +11,35 @@ A VM rather than App Service, for two reasons that both matter to the data:
 Region is **northeurope** (Ireland) — the closest region to Dublin, so
 participants get the shortest round trip.
 
-Size is **Standard_D2s_v5** (2 vCPU, 8 GB). Non-burstable on purpose: the
+Size is **Standard_D2s_v4** (2 vCPU, 8 GB). Non-burstable on purpose: the
 B-series banks CPU credits and throttles once they run out, which would happen
 precisely when several participants arrive together. Measured peak memory for
 this app is 729 MiB, so 8 GB is roughly eleven times headroom.
 
+v4 rather than v5 because an Azure for Students subscription has a quota of
+**0** on the DSv5 family. The quotas that matter here, checked on the
+subscription itself rather than assumed:
+
+| Quota | Limit |
+| --- | --- |
+| Total Regional vCPUs (northeurope) | 6 |
+| Standard DSv4 Family vCPUs | 4 |
+| Standard DSv5 Family vCPUs | **0** |
+
+D2s_v4 uses 2 of each, so it fits twice over. The VM is also created
+**non-zonal** — no `--zone` flag — because this subscription is restricted out
+of northeurope zones 1 and 2 for every D and B size. There is no location-level
+restriction, so a regional deployment is unaffected.
+
 Cost is about €2.11/day.
+
+Before any of this works, three resource providers must be registered on the
+subscription. They are not registered by default and `az vm create` fails
+without them:
+
+```bash
+az provider register --namespace Microsoft.Compute && az provider register --namespace Microsoft.Network && az provider register --namespace Microsoft.Storage
+```
 
 ---
 
@@ -44,7 +67,7 @@ az group create --name cvapp-study --location northeurope
 ```
 
 ```bash
-az vm create --resource-group cvapp-study --name cvapp --image Ubuntu2404 --size Standard_D2s_v5 --admin-username azureuser --generate-ssh-keys --public-ip-sku Standard --os-disk-size-gb 64 --storage-sku Premium_LRS --dns-name-label hcai-cv-align --custom-data deploy/azure/cloud-init.yaml
+az vm create --resource-group cvapp-study --name cvapp --image Ubuntu2404 --size Standard_D2s_v4 --admin-username azureuser --generate-ssh-keys --public-ip-sku Standard --os-disk-size-gb 64 --storage-sku Premium_LRS --dns-name-label hcai-cv-align --custom-data deploy/azure/cloud-init.yaml
 ```
 
 `--dns-name-label` must be unique within the region; if it is taken, pick
