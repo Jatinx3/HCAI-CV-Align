@@ -387,6 +387,8 @@ export default function ReviewClient({
         return;
       }
       const unplaced = Number(res.headers.get("X-Unplaced-Count") ?? "0");
+      const reformatted = res.headers.get("X-Reformatted") === "true";
+      const rawReason = res.headers.get("X-Reformat-Reason");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -394,11 +396,22 @@ export default function ReviewClient({
       a.download = "cv-aligned.pdf";
       a.click();
       URL.revokeObjectURL(url);
-      setExportNote(
-        unplaced > 0
-          ? `Downloaded. ${unplaced} accepted change${unplaced === 1 ? "" : "s"} could not be placed back into your original layout and ${unplaced === 1 ? "is" : "are"} missing from the PDF.`
-          : "Downloaded.",
-      );
+      const notes: string[] = ["Downloaded."];
+      if (reformatted) {
+        // Their own layout could not be rebuilt, so the download is set in a
+        // clean template. Saying so — with the reason — is the difference
+        // between a limitation and a document that quietly is not theirs.
+        const reason = rawReason ? decodeURIComponent(rawReason) : null;
+        notes.push(
+          `Your original design could not be rebuilt, so this is set in a clean template with all your content intact.${reason ? ` (${reason})` : ""}`,
+        );
+      }
+      if (unplaced > 0) {
+        notes.push(
+          `${unplaced} accepted change${unplaced === 1 ? "" : "s"} could not be placed back into your original layout and ${unplaced === 1 ? "is" : "are"} missing from the PDF.`,
+        );
+      }
+      setExportNote(notes.join(" "));
       setStepDone(true);
     } catch {
       setExportNote("Export failed. Check your connection.");

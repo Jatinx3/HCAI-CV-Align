@@ -177,6 +177,43 @@ function withXetexShim(source: string): string {
   return source.slice(0, at) + XETEX_SHIM + source.slice(at);
 }
 
+/**
+ * Drop Font Awesome and stub the icon macros the document uses.
+ *
+ * `\usepackage{fontawesome5}` aborts the engine outright — SIGABRT, no log, no
+ * TeX error, nothing to report — so a CV carrying it could never be exported at
+ * all. The package is very common in the résumé templates people actually use;
+ * the Jake's-resume family puts it on the contact line for the envelope, phone
+ * and LinkedIn glyphs.
+ *
+ * Dropping it costs those few decorative icons and keeps the entire rest of the
+ * document: the same contact details are set beside them as ordinary text, so
+ * nothing a reader needs is lost. Losing four glyphs beats losing the export.
+ *
+ * Only the commands the source actually uses are stubbed, which keeps this from
+ * becoming a reimplementation of the package. `\faIcon{name}` takes an argument
+ * and is stubbed separately. `\fa[A-Z]` is required so that \fancyhf and
+ * friends are left alone.
+ */
+function withoutFontAwesome(source: string): string {
+  const loads = /\\usepackage(\[[^\]]*\])?\{fontawesome5?\}[ \t]*\n?/g;
+  if (!loads.test(source)) return source;
+
+  const used = new Set(
+    [...source.matchAll(/\\(fa[A-Z][A-Za-z]*)/g)].map((m) => m[1]),
+  );
+  const stubs = [
+    String.raw`\providecommand{\faIcon}[1]{}`,
+    ...[...used].map((name) => `\\providecommand{\\${name}}{}`),
+  ].join("\n");
+
+  const stripped = source.replace(loads, "");
+  const begin = /\\begin\{document\}/.exec(stripped);
+  return begin
+    ? `${stripped.slice(0, begin.index)}${stubs}\n${stripped.slice(begin.index)}`
+    : `${stubs}\n${stripped}`;
+}
+
 /** The first real TeX error in a log, rather than the whole transcript. */
 function texErrorLine(output: string): string | null {
   const line = output
@@ -185,12 +222,30 @@ function texErrorLine(output: string): string | null {
   return line ? line.replace(/^!\s*/, "").trim().slice(0, 160) : null;
 }
 
+/**
+ * A LaTeX package that stops the engine dead rather than reporting an error.
+ *
+ * Tectonic's XeTeX aborts on some packages with no log and no message at all,
+ * which leaves nothing for texErrorLine to find and used to surface the raw
+ * shell command to the participant. Naming the package is the only useful thing
+ * that can be said, so it is worth checking the source for the ones known to do
+ * it before falling back to something generic.
+ */
+const FATAL_PACKAGES = [/\\usepackage(\[[^\]]*\])?\{fontawesome5?\}/];
+
+function fatalPackageNote(source: string): string | null {
+  return FATAL_PACKAGES.some((p) => p.test(source))
+    ? "the LaTeX engine could not load one of the packages this CV uses"
+    : null;
+}
+
 /** Compile a .tex source with Tectonic; returns the PDF bytes. */
 export async function compileTex(source: string): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), "cvtex-"));
   try {
     const texPath = join(dir, "cv.tex");
-    await writeFile(texPath, withXetexShim(source), "utf-8");
+    const prepared = withoutFontAwesome(withXetexShim(source));
+    await writeFile(texPath, prepared, "utf-8");
     try {
       await execFileAsync(
         "tectonic",
@@ -199,11 +254,15 @@ export async function compileTex(source: string): Promise<Buffer> {
       );
     } catch (err) {
       // The raw failure is "Command failed: tectonic --outdir /var/folders/…",
-      // which tells the person nothing about their document.
+      // which tells the person nothing about their document. A crash with no
+      // output leaves nothing to quote, so say what can be said instead of
+      // handing them the command line.
       const detail =
         texErrorLine(
           `${(err as { stderr?: string }).stderr ?? ""}\n${(err as { stdout?: string }).stdout ?? ""}`,
-        ) ?? (err as Error).message.slice(0, 160);
+        ) ??
+        fatalPackageNote(source) ??
+        "the LaTeX engine stopped without reporting a reason";
       throw new TexCompileError(`LaTeX could not compile your CV: ${detail}`);
     }
     return await readFile(join(dir, "cv.pdf"));

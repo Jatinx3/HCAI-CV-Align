@@ -3,6 +3,7 @@ import {
   compileTex,
   pdfPageCount,
   replaceTexSpans,
+  TexCompileError,
   type SpanReplacement,
   type TexSpliceResult,
 } from "./tex";
@@ -47,8 +48,33 @@ export async function exportCv(opts: {
         opts.originalData.toString("utf-8"),
         opts.replacements,
       );
-      const pdf = await compileTex(spliced.source);
-      return { pdf, unplaced: spliced.unplaced, reformatted: false };
+      try {
+        const pdf = await compileTex(spliced.source);
+        return { pdf, unplaced: spliced.unplaced, reformatted: false };
+      } catch (err) {
+        /**
+         * A .tex CV that will not compile used to be the end of the road: the
+         * participant saw a shell command and got no document. Their own
+         * template can depend on a package, a font or a class the engine here
+         * does not have, and none of that is their fault or something they can
+         * fix mid-session.
+         *
+         * The clean template is the same guaranteed path the PDF route already
+         * falls back to. They lose their own design, they are told they lost
+         * it, and they still leave with the tailored CV they came for.
+         */
+        if (!(err instanceof TexCompileError)) throw err;
+        // No compiled original to measure, so there is no page count to match.
+        // renderCleanPdf falls back to its densest setting rather than dropping
+        // anything, which is the same bargain the PDF path already makes when
+        // it cannot read the original's length.
+        return {
+          pdf: await renderCleanPdf(opts.fullText, 1),
+          unplaced: spliced.unplaced,
+          reformatted: true,
+          reformatReason: err.message,
+        };
+      }
     }
     case "docx": {
       const spliced = await applyDocxReplacements(

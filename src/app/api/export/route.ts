@@ -101,6 +101,11 @@ export async function POST(request: Request) {
         "Content-Disposition": `attachment; filename="${baseName}-aligned.pdf"`,
         "X-Reformatted": String(result.reformatted),
         "X-Unplaced-Count": String(result.unplaced.length),
+        // Losing your own design is the kind of thing you have to be told
+        // about, and told why. Header-encoded so it survives the binary body.
+        ...(result.reformatReason
+          ? { "X-Reformat-Reason": encodeURIComponent(result.reformatReason) }
+          : {}),
       },
     });
   } catch (err) {
