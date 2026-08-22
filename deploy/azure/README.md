@@ -8,8 +8,16 @@ A VM rather than App Service, for two reasons that both matter to the data:
 - **No request ceiling.** App Service cuts any request at 240s on a load
   balancer that cannot be reconfigured. There is no such limit here.
 
-Region is **northeurope** (Ireland) — the closest region to Dublin, so
-participants get the shortest round trip.
+Region is **swedencentral**, and it is not a free choice. The TU Dublin tenant
+carries an Azure Policy, "Allowed resource deployment regions", that permits
+only these five:
+
+    italynorth  norwayeast  polandcentral  spaincentral  swedencentral
+
+northeurope — the obvious pick for a Dublin study — is blocked, and the
+deployment fails with `InvalidTemplateDeployment` and no usable detail. Sweden
+is the closest of the five, and the round trip is irrelevant next to a model
+call that takes tens of seconds.
 
 Size is **Standard_D2s_v4** (2 vCPU, 8 GB). Non-burstable on purpose: the
 B-series banks CPU credits and throttles once they run out, which would happen
@@ -22,14 +30,14 @@ subscription itself rather than assumed:
 
 | Quota | Limit |
 | --- | --- |
-| Total Regional vCPUs (northeurope) | 6 |
+| Total Regional vCPUs (swedencentral) | 6 |
 | Standard DSv4 Family vCPUs | 4 |
 | Standard DSv5 Family vCPUs | **0** |
 
-D2s_v4 uses 2 of each, so it fits twice over. The VM is also created
-**non-zonal** — no `--zone` flag — because this subscription is restricted out
-of northeurope zones 1 and 2 for every D and B size. There is no location-level
-restriction, so a regional deployment is unaffected.
+D2s_v4 uses 2 of each, so it fits twice over. The VM is created **non-zonal**
+— no `--zone` flag. It is not required in swedencentral, which carries no zone
+restrictions for this SKU, but it is required in northeurope, where every D and
+B size is restricted out of zones 1 and 2; leaving the flag off works in both.
 
 Cost is about €2.11/day.
 
@@ -63,16 +71,17 @@ away), or run `docker login ghcr.io` on the VM before starting the stack.
 ## 2. Create the VM
 
 ```bash
-az group create --name cvapp-study --location northeurope
+az group create --name cvapp-study --location swedencentral
 ```
 
 ```bash
-az vm create --resource-group cvapp-study --name cvapp --image Ubuntu2404 --size Standard_D2s_v4 --admin-username azureuser --generate-ssh-keys --public-ip-sku Standard --os-disk-size-gb 64 --storage-sku Premium_LRS --dns-name-label hcai-cv-align --custom-data deploy/azure/cloud-init.yaml
+az vm create --resource-group cvapp-study --name cvapp --image Ubuntu2404 --size Standard_D2s_v4 --admin-username azureuser --generate-ssh-keys --public-ip-sku Standard --os-disk-size-gb 64 --storage-sku Premium_LRS --public-ip-address-dns-name hcai-cv-align --custom-data deploy/azure/cloud-init.yaml
 ```
 
-`--dns-name-label` must be unique within the region; if it is taken, pick
-another. It gives the VM the name TLS will be issued for:
-`hcai-cv-align.northeurope.cloudapp.azure.com`
+The flag is `--public-ip-address-dns-name`, not `--dns-name-label`; the latter
+is rejected outright by az CLI 2.85. The label must be unique within the region;
+if it is taken, pick another. It gives the VM the name TLS will be issued for:
+`hcai-cv-align.swedencentral.cloudapp.azure.com`
 
 Open the web ports (SSH is already open from `az vm create`):
 
@@ -87,11 +96,11 @@ az vm open-port --resource-group cvapp-study --name cvapp --port 443 --priority 
 ## 3. Copy the stack up and fill in the secrets
 
 ```bash
-scp deploy/azure/docker-compose.yml deploy/azure/Caddyfile azureuser@hcai-cv-align.northeurope.cloudapp.azure.com:/tmp/
+scp deploy/azure/docker-compose.yml deploy/azure/Caddyfile azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com:/tmp/
 ```
 
 ```bash
-ssh azureuser@hcai-cv-align.northeurope.cloudapp.azure.com
+ssh azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com
 ```
 
 Then on the VM — cloud-init needs a minute or two on first boot, so if
@@ -114,7 +123,7 @@ cd /opt/cvapp && sudo docker compose up -d
 Caddy requests a certificate on first start; give it thirty seconds, then:
 
 ```bash
-curl -sSI https://hcai-cv-align.northeurope.cloudapp.azure.com/login | head -1
+curl -sSI https://hcai-cv-align.swedencentral.cloudapp.azure.com/login | head -1
 ```
 
 `HTTP/2 200` means the app is live and TLS is valid. If it is not, read the
@@ -133,7 +142,7 @@ sudo cp /opt/cvapp/data/credentials.csv . && sudo chown azureuser: credentials.c
 Then copy it down to your laptop and delete it from the VM:
 
 ```bash
-scp azureuser@hcai-cv-align.northeurope.cloudapp.azure.com:~/credentials.csv . && ssh azureuser@hcai-cv-align.northeurope.cloudapp.azure.com "rm -f ~/credentials.csv /opt/cvapp/data/credentials.csv"
+scp azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com:~/credentials.csv . && ssh azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com "rm -f ~/credentials.csv /opt/cvapp/data/credentials.csv"
 ```
 
 ## During the study
@@ -145,13 +154,13 @@ cd /opt/cvapp && sudo docker compose exec app npx tsx scripts/export-study.ts --
 ```
 
 ```bash
-scp azureuser@hcai-cv-align.northeurope.cloudapp.azure.com:~/study-*.tar.gz .
+scp azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com:~/study-*.tar.gz .
 ```
 
 Watch resource use if you want reassurance during a busy session:
 
 ```bash
-ssh azureuser@hcai-cv-align.northeurope.cloudapp.azure.com "sudo docker stats --no-stream"
+ssh azureuser@hcai-cv-align.swedencentral.cloudapp.azure.com "sudo docker stats --no-stream"
 ```
 
 ## When the study is finished
