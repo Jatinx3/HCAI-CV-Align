@@ -70,6 +70,13 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/prisma ./prisma
+# The researcher's own scripts, which have to run against the deployed
+# database rather than a laptop copy of it: provisioning the participant
+# accounts, exporting the study data, pseudonymising it. Without these in the
+# image there is no way to create a login on the running server.
+COPY --from=build /app/scripts ./scripts
+COPY --from=build /app/tsconfig.json ./tsconfig.json
+COPY --from=build /app/src ./src
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

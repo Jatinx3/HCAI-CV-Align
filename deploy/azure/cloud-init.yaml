@@ -1,0 +1,62 @@
+#cloud-config
+# First-boot provisioning for the study VM.
+#
+# Installs Docker, lays down the compose stack, and stops short of starting it.
+# It stops deliberately: the app needs an API key and an auth secret, and
+# cloud-init is stored in Azure instance metadata where anyone with reader
+# access to the VM can read it back. Secrets are entered over SSH instead, once,
+# and the last step of the README brings the stack up.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - unattended-upgrades
+
+write_files:
+  - path: /opt/cvapp/.env.template
+    permissions: "0600"
+    content: |
+      # Copy to .env and fill in. Never commit this file.
+
+      # The image you pushed, e.g. ghcr.io/jatinx3/hcai-cv-align:study
+      APP_IMAGE=
+      # The VM's DNS name, e.g. hcai-cv-align.northeurope.cloudapp.azure.com
+      SITE_ADDRESS=
+
+      # openssl rand -base64 32
+      AUTH_SECRET=
+
+      LLM_PROVIDER=openrouter
+      OPENROUTER_API_KEY=
+      OPENROUTER_MODEL=anthropic/claude-sonnet-5
+
+      # The Microsoft Forms link participants are handed at the end.
+      STUDY_FEEDBACK_FORM_URL=
+
+runcmd:
+  # Docker from Docker's own repository rather than Ubuntu's, because the
+  # distro package lags and does not ship the compose v2 plugin.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - >
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]
+    https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable"
+    > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+
+  # The database directory on the VM's own ext4 disk.
+  - mkdir -p /opt/cvapp/data
+  - chown -R root:root /opt/cvapp
+
+  # Security updates apply themselves for the life of the study; nobody is
+  # going to be patching a VM by hand while participants are using it.
+  - systemctl enable --now unattended-upgrades
+
+final_message: "cvapp VM ready after $UPTIME s. Fill /opt/cvapp/.env, then docker compose up -d."

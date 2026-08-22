@@ -1,0 +1,33 @@
+# TLS for the study, obtained and renewed automatically.
+#
+# The site address is substituted from SITE_ADDRESS at start, which is the VM's
+# own DNS name (<label>.northeurope.cloudapp.azure.com). Caddy answers the
+# Let's Encrypt HTTP-01 challenge on port 80 and serves everything on 443, so
+# participants type a plain https:// URL and never see a certificate warning —
+# which matters when the first thing the site asks them for is a password.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy app:3000 {
+		# A rewrite run can hold the connection open for minutes while Tectonic
+		# or LibreOffice works. Caddy's defaults would give up long before the
+		# app does, so the proxy is told to wait longer than any route can take.
+		transport http {
+			read_timeout 600s
+			write_timeout 600s
+			dial_timeout 10s
+		}
+	}
+
+	request_body {
+		# CVs are small; this is a bound on nonsense, not on real uploads.
+		max_size 25MB
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}
