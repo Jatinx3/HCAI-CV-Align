@@ -12,7 +12,8 @@
     "export-study": "tsx scripts/export-study.ts",
     "provision:batch": "tsx scripts/provision-batch.ts",
     "pseudonymise": "tsx scripts/pseudonymise.ts",
-    "sheet": "tsx scripts/participant-sheet.ts"
+    "sheet": "tsx scripts/participant-sheet.ts",
+    "check-models": "tsx scripts/check-models.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

@@ -104,11 +104,15 @@ export const MODEL_CATALOGUE: StudyModel[] = [
   },
   {
     id: "gpt-oss-20b",
-    providerModel: "openai/gpt-oss-20b:free",
+    // Not the :free variant. OpenRouter withdrew it mid-study and the endpoint
+    // answers 404 with "This model is unavailable for free", which reached a
+    // participant as four of five sections failing to analyse. The paid slug
+    // costs about a tenth of a cent for a full review, so metering it would
+    // cost more attention than the model does.
+    providerModel: "openai/gpt-oss-20b",
     label: "GPT-OSS 20B",
     tier: "unlimited",
-    blurb:
-      "Free and unlimited, and the slowest here — a full review can take five minutes.",
+    blurb: "Unlimited, and the slowest here — a full review can take five minutes.",
     quotaPerMode: null,
   },
 ];
