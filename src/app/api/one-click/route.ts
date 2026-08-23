@@ -10,6 +10,7 @@ import {
   buildOneClickSystemPrompt,
   buildOneClickUserPrompt,
   deriveLineReplacements,
+  stripModelFences,
 } from "@/lib/one-click";
 import { complete, LlmConfigError, LlmCallError } from "@/lib/llm";
 import { checkModelAllowed, chargeModelRun } from "@/lib/model-allowance";
@@ -138,10 +139,13 @@ export async function POST(request: Request) {
     // can still fail on a hostile PDF — that is our problem, not a second run
     // the participant should have to pay for out of their allowance.
     await chargeModelRun(step.id);
+    // The model is handed a fenced prompt and sometimes fences its reply to
+    // match; the closing delimiter would otherwise print as a line of the CV.
+    const body = stripModelFences(rewrittenBody);
     // The applicant's own contact block goes back exactly as they wrote it.
     rewritten = header?.text.trim()
-      ? `${header.text.trim()}\n\n${rewrittenBody.trim()}`
-      : rewrittenBody;
+      ? `${header.text.trim()}\n\n${body.trim()}`
+      : body;
   } catch (err) {
     if (err instanceof LlmConfigError) {
       return NextResponse.json({ error: err.message }, { status: 503 });

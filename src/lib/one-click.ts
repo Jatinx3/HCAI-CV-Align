@@ -35,6 +35,31 @@ Return the full rewritten CV as plain text.`;
 }
 
 /**
+ * Strip the delimiters the model echoed back around its own answer.
+ *
+ * The user prompt fences the job description and the CV in triple quotes, and a
+ * model handed a fenced input will sometimes fence its output to match. The
+ * closing `"""` then travels the whole pipeline as an ordinary line of the CV
+ * and prints under the last section — which is exactly how it reached a
+ * participant's downloaded PDF, three characters below "Methodologies".
+ *
+ * Only whole lines that are nothing but a fence are removed, and only from the
+ * ends, so a line of real CV text that happens to contain quotes is untouched.
+ * Markdown code fences are treated the same way: same reflex, same damage.
+ */
+export function stripModelFences(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const isFence = (l: string) => /^\s*(?:`{3,}[a-zA-Z0-9]*|"{3,}|'{3,})\s*$/.test(l);
+  const isDroppable = (l: string) => l.trim().length === 0 || isFence(l);
+
+  let start = 0;
+  let end = lines.length;
+  while (start < end && isDroppable(lines[start])) start++;
+  while (end > start && isDroppable(lines[end - 1])) end--;
+  return lines.slice(start, end).join("\n");
+}
+
+/**
  * Turn a whole-CV rewrite into line-aligned span replacements so the .tex /
  * .docx paths can splice it through the same per-format pipeline the
  * human-centered mode uses. The prompt asks the model to keep line structure;
