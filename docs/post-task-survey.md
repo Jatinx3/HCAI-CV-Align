@@ -38,11 +38,11 @@ claim — so the survey asks whether people perceived what the interface promise
 
 | Value | Claim made in the app | Survey item |
 | --- | --- | --- |
-| Transparency | You can see why every change is proposed | I could see why each change was being proposed. |
-| User control | Every change is yours to accept, edit, reject, or undo | I decided which changes were made to my CV. |
-| Authenticity | The assistant may only rework what your CV already says | The final CV still represented me accurately. |
-| Usability | The work should be readable and never leave you stuck | This version was clear to use, and I always knew what to do next. |
-| Trust | *no feature of its own — expected to follow from the other four* | I would rely on this version when applying for a real job. |
+| Transparency | You can see why every change is proposed | (Transparency) I could see why each change was being proposed. |
+| User control | Every change is yours to accept, edit, reject, or undo | (User control) I decided which changes were made to my CV. |
+| Authenticity | The assistant may only rework what your CV already says | (Authenticity) The final CV still represented me accurately. |
+| Usability | The work should be readable and never leave you stuck | (Usability) This version was clear to use, and I always knew what to do next. |
+| Trust | *no feature of its own — expected to follow from the other four* | (Trust) I would rely on this version when applying for a real job. |
 
 All five are answerable for both versions, which is what keeps the pair
 comparable. The baseline scoring low on transparency and control is then a
@@ -88,6 +88,14 @@ Likert rows.
 Two open-ended items were dropped ("most useful", "anything you would change").
 The interview guide covers both in more depth; the two kept here are the ones
 that support the forced choice.
+
+Each item names its design value in brackets, which carries a cost worth
+declaring. Transparency, User control and Authenticity appear as labelled chips
+in the human-centered interface and nowhere in the baseline, so participants meet
+those words in only one of the two conditions. A label may cue recognition more
+strongly in the review block than in the one-click block, and a difference between
+conditions on those three items should be read with that asymmetry in mind rather
+than as a clean measure of perceived value delivery.
 
 **This is a change to an approved instrument.** Confirm it with your supervisor,
 and check your ethics approval covers it, before collecting data.
