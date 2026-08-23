@@ -273,6 +273,17 @@ export function validateSuggestions(
       });
       return;
     }
+    // The original left intact with new claims appended. Checked before the
+    // record rule so the reason a participant's log gives is the fabrication,
+    // which is the one worth counting, rather than whatever the text also is.
+    if (appendsUnsupportedClaim(original, suggested, sectionText)) {
+      rejected.push({
+        reason:
+          "Suggestion adds content the CV does not support (appended to the original).",
+        raw: item,
+      });
+      return;
+    }
     // Degree titles, employers, dates and grades are records, not prose. There
     // is no wording in them to improve, and rewriting the row destroys the
     // title/date structure the document is set in.
@@ -417,6 +428,74 @@ function addsFirstPerson(original: string, suggested: string): boolean {
  * True when both texts are built from exactly the same words, so the only
  * difference is their order.
  */
+/** Content words, lowercased, punctuation stripped. */
+function contentWords(s: string): string[] {
+  return normalise(s)
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !GRAMMAR_WORDS.has(w));
+}
+
+/**
+ * Words that carry no claim, so adding them invents nothing.
+ *
+ * Kept deliberately small. This list exists to stop a reworded connective from
+ * being read as a fabricated skill, not to wave through vocabulary — anything
+ * that could name a tool, a scale or an outcome must not be in here.
+ */
+const GRAMMAR_WORDS = new Set([
+  "and", "the", "for", "with", "that", "this", "from", "into", "onto", "over",
+  "across", "through", "while", "which", "their", "them", "they", "was", "were",
+  "are", "has", "have", "had", "its", "his", "her", "our", "out", "via", "per",
+  "also", "then", "than", "such", "each", "both", "all", "any", "more", "most",
+  "using", "used", "use", "including", "well", "very", "able",
+]);
+
+/**
+ * The original kept whole, with new claims bolted onto the end.
+ *
+ * This is the failure the other four rules were blind to, and it is the one
+ * that matters most. A proposal like
+ *
+ *     "…growing from six sources to forty"
+ *  -> "…growing from six sources to forty, using Apache Airflow and
+ *      Kubernetes on AWS"
+ *
+ * quotes the original exactly, so it is not a reorder; it changes the text, so
+ * it is not a no-op; and it arrives with an explanation and a cited job
+ * requirement. It passed every check and reached the participant looking
+ * identical to an honest suggestion — while adding two technologies the CV
+ * never mentioned. A real model produced exactly this shape during model
+ * selection, so it is a live failure mode rather than a hypothetical one.
+ *
+ * The distinction that matters is not "did it add words" — surfacing something
+ * the CV already says is allowed, and the prompt asks for it. It is whether the
+ * added words appear anywhere in the section being edited. If they do not, the
+ * suggestion is asserting something with no support in the applicant's own
+ * document, which is the single thing this mode promises never to do.
+ *
+ * Judged against the section rather than the whole CV, which can reject a
+ * genuine cross-section move. That trade is deliberate: a lost suggestion costs
+ * the participant one idea, and a fabricated one costs them their honesty.
+ */
+function appendsUnsupportedClaim(
+  original: string,
+  suggested: string,
+  sectionText: string,
+): boolean {
+  // Trailing punctuation is not part of the claim; a clause appended after a
+  // full stop replaces it, so compare without it.
+  const stripTail = (s: string) => normalise(s).replace(/[\s.,;:!?—–-]+$/u, "");
+  const kept = stripTail(original);
+  const whole = normalise(suggested);
+  if (kept.length === 0 || !whole.includes(kept)) return false;
+
+  // Whatever sits either side of the untouched original is the addition.
+  const added = whole.split(kept).join(" ");
+  const supported = new Set(contentWords(sectionText));
+  return contentWords(added).some((w) => !supported.has(w));
+}
+
 function isReordering(original: string, suggested: string): boolean {
   const words = (s: string) =>
     normalise(s)
