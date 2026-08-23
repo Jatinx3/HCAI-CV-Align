@@ -66,14 +66,14 @@ export default async function Home() {
 
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10 sm:px-6 sm:py-12">
         <div className="mb-12 max-w-2xl">
-          <p className="label-caps">Tailoring, on your terms</p>
+          <p className="label-caps">Study task</p>
           <h1 className="mt-2 font-serif text-[2.5rem] font-semibold leading-[1.15] tracking-tight text-foreground">
-            Align your CV with a job description
+            Tailor a CV to a job description
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-muted-foreground">
-            Upload your CV and paste the job description you’re applying for.
-            The assistant helps you present what’s already there —{" "}
-            <em className="font-serif">honestly</em>.
+            Upload your CV and paste the job description you are applying
+            against. The assistant proposes changes to how your existing
+            experience is worded.
           </p>
         </div>
         {study && (

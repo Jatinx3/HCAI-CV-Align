@@ -4,10 +4,40 @@ import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 
+/**
+ * Where to land after signing in — a path on this site, never a URL.
+ *
+ * Auth.js writes the callback into the query string when it bounces someone to
+ * the login page, and behind a reverse proxy it built that from the address the
+ * server binds to rather than the address the participant typed: signing in
+ * sent them to https://0.0.0.0:3000/, which resolves to nothing.
+ *
+ * Only the path is kept, and only when it looks like a path. A query parameter
+ * is under the control of whoever sends the link, so anything else in there is
+ * either wrong or an attempt to bounce a participant off the study onto another
+ * site with a convincing referrer.
+ */
+function safeCallback(raw: string | null): string {
+  if (!raw) return "/";
+  // A protocol-relative "//evil.example" is a URL, not a path, despite starting
+  // with a slash.
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  try {
+    const url = new URL(raw);
+    // "javascript:alert(1)" is a URL that parses quite happily, with a pathname
+    // of "alert(1)"; without this it would come back out as a relative path.
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "/";
+    const path = `${url.pathname}${url.search}${url.hash}`;
+    return path.startsWith("/") ? path : "/";
+  } catch {
+    return "/";
+  }
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/";
+  const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,15 +67,14 @@ function LoginForm() {
     <main className="flex min-h-screen items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-md">
         <div className="border-t-2 border-accent pt-6">
-          <p className="label-caps">Research prototype</p>
+          <p className="label-caps">MSc research study</p>
           <h1 className="mt-3 font-serif text-4xl font-semibold leading-[1.15] tracking-tight text-foreground">
-            Your CV,{" "}
-            <em className="font-normal italic text-accent">aligned</em> —<br />
-            never invented.
+            CV <span className="text-accent">·</span> JD{" "}
+            <span className="font-normal italic">Alignment Assistant</span>
           </h1>
           <p className="mt-4 max-w-sm text-[15px] leading-relaxed text-muted-foreground">
-            Tailor your CV to a job description with every change explained and
-            you in control of each one.
+            A research prototype for the MSc in Human-Centred AI at TU Dublin.
+            It compares two ways of tailoring a CV to a job description.
           </p>
         </div>
 
