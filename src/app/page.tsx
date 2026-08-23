@@ -2,7 +2,7 @@ import { auth, signOut } from "@/lib/auth";
 import { studyState } from "@/lib/study";
 import { modelAllowances } from "@/lib/model-allowance";
 import UploadForm from "./upload-form";
-import StudyBanner from "./study-banner";
+import StudyBanner, { StudyFinishPrompt } from "./study-banner";
 
 export default async function Home() {
   const session = await auth();
@@ -89,6 +89,10 @@ export default async function Home() {
           studyParticipant={Boolean(study)}
           allowances={allowances}
         />
+        {/* After the form, not before it: by the time this appears the
+            participant has just finished a rewrite and is at the bottom of the
+            page, and this is the one thing they need next. */}
+        {study?.canFinish && <StudyFinishPrompt />}
       </main>
 
       <footer className="border-t border-border">

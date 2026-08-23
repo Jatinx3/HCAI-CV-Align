@@ -85,20 +85,41 @@ export default function StudyBanner({
       )}
 
       {canFinish && (
-        <div className="mt-4 border-t border-accent/30 pt-4">
-          <p className="text-sm leading-relaxed text-foreground">
-            You have used both on the reserved model. Try either again on the
-            unlimited models if you want to, or go on to the comparison whenever
-            you are ready.
-          </p>
-          <Link
-            href="/study/feedback"
-            className="mt-3 inline-block h-10 cursor-pointer bg-primary px-5 text-sm font-semibold leading-10 tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90"
-          >
-            Go to the comparison
-          </Link>
-        </div>
+        <p className="mt-4 border-t border-accent/30 pt-4 text-sm leading-relaxed text-foreground">
+          You have used both on the reserved model. Try either again on the
+          unlimited models if you want to, or go on to the comparison — the
+          button for it is at the end of this page.
+        </p>
       )}
+    </section>
+  );
+}
+
+/**
+ * The way out of the session, placed where the participant actually is.
+ *
+ * This used to be a button inside the banner at the top of the page. By the
+ * time it appears, the participant has just finished a rewrite and is at the
+ * bottom of a long page — so the one control they need next was a full screen
+ * above them, and finishing the study meant scrolling back up to look for
+ * something they had no reason to expect there. Rendered after the upload form
+ * instead, it is the next thing they see.
+ */
+export function StudyFinishPrompt() {
+  return (
+    <section className="mt-12 border border-accent/40 bg-accent-soft p-5">
+      <p className="label-caps !text-accent">Both parts done</p>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-foreground">
+        You have used both systems on the reserved model. Run either of them
+        again on the unlimited models if you want to, or go on to the short
+        comparison whenever you are ready.
+      </p>
+      <Link
+        href="/study/feedback"
+        className="mt-4 inline-block h-11 cursor-pointer bg-primary px-6 font-semibold tracking-wide text-on-primary transition-opacity duration-150 hover:opacity-90"
+      >
+        Go to the comparison
+      </Link>
     </section>
   );
 }
