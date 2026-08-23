@@ -11,7 +11,8 @@
     "corpus": "tsx scripts/corpus/check.ts",
     "export-study": "tsx scripts/export-study.ts",
     "provision:batch": "tsx scripts/provision-batch.ts",
-    "pseudonymise": "tsx scripts/pseudonymise.ts"
+    "pseudonymise": "tsx scripts/pseudonymise.ts",
+    "sheet": "tsx scripts/participant-sheet.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

@@ -47,6 +47,7 @@ next-env.d.ts
 scripts/corpus/out/
 study-export/
 credentials*.csv
+participants*.csv
 
 # Local editor/tooling workspace
 .claude/
